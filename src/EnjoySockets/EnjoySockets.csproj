@@ -1,28 +1,34 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-	<RootNamespace>EnjoySockets</RootNamespace>
-	<AssemblyName>EnjoySockets</AssemblyName>
-	<Version>1.0.0</Version>
-	<PackageId>EnjoySockets</PackageId>
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-	<LangVersion>12.0</LangVersion>
-	<GenerateDocumentationFile>true</GenerateDocumentationFile>
-	<NoWarn>$(NoWarn);1591</NoWarn>
-	<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-	<Authors>Luke Matt</Authors>
-	<Description>High-performance, lightweight and developer-friendly TCP socket library for .NET</Description>
-	<RepositoryUrl>https://github.com/lukematt574/EnjoySockets</RepositoryUrl>
-	<RepositoryType>git</RepositoryType>
-	<PackageTags>sockets;networking;tcp</PackageTags>
-	<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-  </PropertyGroup>
+	<PropertyGroup>
+		<RootNamespace>EnjoySockets</RootNamespace>
+		<AssemblyName>EnjoySockets</AssemblyName>
+		<Version>1.1.0</Version>
+		<PackageId>EnjoySockets</PackageId>
+		<TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<LangVersion>12.0</LangVersion>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<Authors>Luke Matt</Authors>
+		<Description>EnjoySockets - high-performance TCP sockets for .NET 6 and 8+, built for client-server apps with secure and RPC. Modern async API, efficient binary protocols, and built-in encryption (AES-GCM, RSA, ECDH) make networking simple, reliable, and safe.</Description>
+		<RepositoryUrl>https://github.com/lukematt574/EnjoySockets</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>tcp;networking;sockets;high-performance;rpc;client-server;binary-protocol;encryption</PackageTags>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageReadmeFile>README_NUGET.md</PackageReadmeFile>
+	</PropertyGroup>
 
 	<ItemGroup>
 		<PackageReference Include="MemoryPack" Version="1.21.4" />
-		<TrimmerRootAssembly Include="EnjoySockets" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="icon.png" Pack="true" PackagePath="\" />
+		<None Include="README_NUGET.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 </Project>

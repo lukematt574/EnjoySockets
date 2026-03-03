@@ -4,7 +4,10 @@ namespace EnjoySockets
 {
     public class EAddress
     {
-        static string LocalIP { get; set; } = "127.0.0.1";
+        /// <summary>
+        /// Default 127.0.0.1
+        /// </summary>
+        public static string LocalIP { get; set; } = "127.0.0.1";
 
         public IPEndPoint? EndPoint { get; }
         private EAddress() { }
@@ -14,7 +17,7 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Get default address - 127.0.0.1:3001
+        /// Get default address - 127.0.0.1:3001 (LocalIP)
         /// </summary>
         public static EAddress Get()
         {
@@ -22,7 +25,7 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Get default address - 127.0.0.1:port
+        /// Get default address - 127.0.0.1:port (LocalIP)
         /// </summary>
         public static EAddress Get(int port)
         {

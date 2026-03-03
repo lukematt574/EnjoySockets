@@ -1,4 +1,6 @@
-﻿using System.Reflection;
+﻿// Copyright (c) Luke Matt. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace EnjoySockets

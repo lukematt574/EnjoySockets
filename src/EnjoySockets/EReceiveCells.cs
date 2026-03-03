@@ -31,7 +31,7 @@ namespace EnjoySockets
                     if (!IsClass(type))
                         continue;
 
-                    var methodsWithAttr = type.GetMethods();
+                    var methodsWithAttr = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
                     if (methodsWithAttr.Length < 1)
                         continue;
 

@@ -1,4 +1,6 @@
-﻿using System.Buffers.Binary;
+﻿// Copyright (c) Luke Matt. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 
 namespace EnjoySockets
@@ -146,68 +148,82 @@ namespace EnjoySockets
         internal static int ExportSpki(ECDiffieHellman ec, Span<byte> buffer)
         {
             var p = ec.ExportParameters(false);
-            CurveInfo ci;
-
             if (p.Q.X == null || p.Q.Y == null) return 0;
 
-            if (p.Curve.Oid.Value == ECCurve.NamedCurves.nistP256.Oid.Value)
-                ci = P256;
-            else if (p.Curve.Oid.Value == ECCurve.NamedCurves.nistP384.Oid.Value)
-                ci = P384;
-            else if (p.Curve.Oid.Value == ECCurve.NamedCurves.nistP521.Oid.Value)
-                ci = P521;
-            else
-                return 0;
+            CurveInfo ci = p.Curve.Oid.Value switch
+            {
+                "1.2.840.10045.3.1.7" => P256, // nistP256
+                "1.3.132.0.34" => P384,        // nistP384
+                "1.3.132.0.35" => P521,        // nistP521
+                _ => default
+            };
 
-            int Xlen = p.Q.X.Length;
-            int Ylen = p.Q.Y.Length;
-
-            if (Xlen != ci.CoordinateSize || Ylen != ci.CoordinateSize)
-                return 0;
-
-            if (buffer.Length < ci.SpkiSize)
-                return 0;
+            if (ci.CurveOid == null) return 0;
 
             int coord = ci.CoordinateSize;
-            int ecPointSize = 1 + coord + coord; // 04 + X + Y
-            int bitStringTotal = ecPointSize + 3; // 03 len 00 + ecPoint
+            int ecPointSize = 1 + 2 * coord; // 04 + X + Y
+
+            // BIT STRING: Tag(1) + Len(?) + UnusedBits(1) + Data
+            int bitStringDataLen = 1 + ecPointSize;
+            int bitStringHeaderLen = bitStringDataLen > 127 ? 3 : 2;
+            int bitStringTotal = bitStringHeaderLen + bitStringDataLen;
+
+            // AlgorithmIdentifier: Tag(1) + Len(1) + OIDs
             int algIdLen = 2 + EcPublicKeyOid.Length + ci.CurveOid.Length;
 
-            int spkiLen = 2 + algIdLen + bitStringTotal;
+            // SPKI: Tag(1) + Len(?) + AlgId + BitString
+            int spkiDataLen = algIdLen + bitStringTotal;
+            int spkiHeaderLen = spkiDataLen > 127 ? 3 : 2;
+            int totalSize = spkiHeaderLen + spkiDataLen;
 
-            if (spkiLen != ci.SpkiSize)
-                return 0;
+            if (buffer.Length < totalSize) return 0;
 
             int o = 0;
 
             // ---- SPKI SEQUENCE
             buffer[o++] = 0x30;
-            buffer[o++] = (byte)(spkiLen - 2);
+            if (spkiDataLen > 127)
+            {
+                buffer[o++] = 0x81;
+            }
+            buffer[o++] = (byte)spkiDataLen;
 
             // ---- AlgorithmIdentifier SEQUENCE
             buffer[o++] = 0x30;
             buffer[o++] = (byte)(algIdLen - 2);
-
             EcPublicKeyOid.CopyTo(buffer[o..]);
             o += EcPublicKeyOid.Length;
-
             ci.CurveOid.CopyTo(buffer[o..]);
             o += ci.CurveOid.Length;
 
             // ---- BIT STRING
             buffer[o++] = 0x03;
-            buffer[o++] = (byte)(bitStringTotal - 2);
-            buffer[o++] = 0x00;
+            if (bitStringDataLen > 127)
+            {
+                buffer[o++] = 0x81;
+            }
+            buffer[o++] = (byte)bitStringDataLen;
+            buffer[o++] = 0x00; // 0 unused bits
 
-            buffer[o++] = 0x04; // uncompressed point
+            // ---- EC Point
+            buffer[o++] = 0x04; // uncompressed
 
-            p.Q.X.CopyTo(buffer[o..]);
+            CopyCoordinate(p.Q.X, buffer.Slice(o, coord));
             o += coord;
-
-            p.Q.Y.CopyTo(buffer[o..]);
+            CopyCoordinate(p.Q.Y, buffer.Slice(o, coord));
             o += coord;
 
             return o;
+        }
+
+        private static void CopyCoordinate(byte[] source, Span<byte> target)
+        {
+            if (source.Length == target.Length)
+                source.CopyTo(target);
+            else if (source.Length > target.Length)
+                source.AsSpan(source.Length - target.Length).CopyTo(target);
+            else
+                source.CopyTo(target.Slice(target.Length - source.Length));
         }
 
         #endregion

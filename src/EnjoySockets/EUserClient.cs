@@ -1,4 +1,6 @@
-﻿using EnjoySockets.DTO;
+﻿// Copyright (c) Luke Matt. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using EnjoySockets.DTO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -57,6 +59,7 @@ namespace EnjoySockets
         /// </remarks>
         public EUserClient(ERSA ersa, ETCPClientConfig config) : base(new ESocketResourceClient(config, ersa))
         {
+            EReceiveCells.Initialize();
             if (SocketResource != null)
             {
                 SocketResource.UserObj = this;
@@ -528,6 +531,19 @@ namespace EnjoySockets
             }
         }
 
+        /// <summary>
+        /// Efficiently sends a heartbeat message to detect disconnection.
+        /// </summary>
+        /// <remarks>
+        /// The message is considered sent once it is successfully handed off to the operating system. 
+        /// Note that returning <see langword="true"/> does not guarantee that the connection is still active; 
+        /// rather, it forces the underlying TCP socket to attempt a transmission, which triggers the 
+        /// stack to update and verify the current connection status.
+        /// </remarks>
+        /// <returns>
+        /// <see langword="true"/> if the message was successfully passed to the operating system;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
         public ValueTask<bool> SendHeartbeat()
         {
             if (SocketResource?.BasicSocket == null)

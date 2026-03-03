@@ -1,4 +1,6 @@
-﻿using EnjoySockets.DTO;
+﻿// Copyright (c) Luke Matt. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using EnjoySockets.DTO;
 using System.Buffers.Binary;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -64,7 +66,7 @@ namespace EnjoySockets
             Ersa = rsa;
             _outPublicKey = ECDiffieHellman.Create(Config.Curve);
             ECDH = ECDiffieHellman.Create(Config.Curve);
-            var pk = new byte[200];
+            var pk = new byte[158];
             var pkLength = EAesGcm.ExportSpki(ECDH, pk);
             PublicKey = pk.AsMemory(0, pkLength);
 
