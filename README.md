@@ -59,7 +59,7 @@ To ensure your application works correctly with Native AOT, add the following se
 
 ## Quick Start
 
-Below is a minimal example showing how to set up a server and a client. EnjoySockets uses an intuitive approach where incoming messages are automatically routed to methods that match the message name.
+Below is a minimal example showing how to set up a server and a client. EnjoySockets uses an intuitive approach where incoming messages are automatically routed to methods whose names match the target name provided as the first argument when sending a message.
 
 ### Server Side
 
@@ -223,7 +223,8 @@ public class MyUserClient : EUserClient
 {
     public MyUserClient(ERSA ersa, ETCPClientConfig config) : base(ersa, config) { }
 
-    // Provide credentials for the handshake (can be a string, class, or any object support via 'MemoryPack')
+    // Provide credentials for the handshake 
+	// (can be a string, class, or any object support via 'MemoryPack')
 	// Object cannot exceed 1250 bytes after serialization
     protected override object? GetAuthorization() 
     {
@@ -251,7 +252,8 @@ public class MyUserClient : EUserClient
 
     protected override void OnDisconnected()
     {
-        // Clean up local resources to prepare for a possible new session. This fires when the session is permanently closed.
+        // Clean up local resources to prepare for a possible new session.
+		// This fires when the session is permanently closed.
         Console.WriteLine("Disconnected from server.");
     }
 }
@@ -272,7 +274,7 @@ public class MyUserServer : EUserServer
     /// <summary>
     /// Mandatory: Must be named 'Authorization' and return Task<byte>.
     /// The input parameter type must match the object type returned by Client's GetAuthorization().
-    /// Return 0 for success.
+    /// Return 0 for Success, or any value > 10 for failure (reported to the client).
     /// </summary>
     protected Task<byte> Authorization(string credentials)
     {
@@ -320,7 +322,7 @@ public class MyUserServer : EUserServer
 | --- | --- | --- |
 | **OnConnected** | First-time handshake success. | First-time handshake success. |
 | **OnReconnectAttempt** | Fires on every background attempt. | (Handled automatically by library). |
-| **OnDisconnected** | When the client call Disconnect(). | When KeepAlive expires or client quits. |
+| **OnDisconnected** | When the client or server side call Disconnect(). | When KeepAlive expires or client quits. |
 
 ---
 
@@ -400,9 +402,7 @@ public class GameService
     public void OnProfileReceived(MyUserServer user, UserProfile profile)
     {
         _cachedProfile = profile; // This state persists in this instance
-		var text = $"Profile {profile.Name} loaded.";
-        _db.Logs.Add(text);
-        Console.WriteLine(text);
+        _db.Logs.Add($"Profile {profile.Name} loaded.");
     }
 }
 
@@ -410,3 +410,207 @@ public class GameService
 
 > [!TIP]
 > **Zero Configuration:** You don't need to call any "Register" methods. As long as the method name matches the incoming message and the signature starts with your user type (`MyUserClient`/`MyUserServer`), EnjoySockets will find it and manage the instance lifecycle for you.
+
+## 🔌 Connection Management
+
+EnjoySockets provides flexible ways to manage connection lifecycles, including robust automatic reconnection logic for both clients and servers.
+
+### 🌐 Client-Side Connection
+
+There are two primary ways to connect a client:
+
+1. **Standard Connect:** `client.Connect(EAddress)` - A single connection attempt. Returns a status code immediately.
+2. **Auto Reconnect:** `client.ConnectWithAutoReconnect(EAddress, delayMs)` - Once a session is **successfully established**, the library will automatically try to re-establish the link if it's dropped.
+
+> [!IMPORTANT]
+> **Auto Reconnect** starts working only after the first successful login. If the very first connection attempt fails (e.g., server is offline), the library will return a status code and will **not** start the automatic loop. This applies to the server-side listener as well.
+
+#### Connection Status Codes (`byte`)
+
+| Code | Meaning | Description |
+| --- | --- | --- |
+| **0** | **Success** | Connection established successfully. |
+| **1** | Invalid Endpoint | The provided IP address or port is invalid. |
+| **2** | Timeout | The attempt timed out. Adjust via `ETCPClientConfig.ConnectTimeout`. |
+| **3** | Server Full | The server has reached its maximum connection limit. Adjust via `ETCPServerConfig.MaxSockets`. |
+| **4** | Verification Failed | Handshake failed during server verification. |
+| **5** | Encryption Error | Failed to establish the secure AES-256-GCM key. |
+| **6** | General Failure | An unexpected network or system error occurred. |
+| **7** | Auth Send Failure | Failed to deliver authorization data to the server. |
+| **8** | Invalid Auth Data | Server rejected the authorization payload format. |
+| **9** | Already Active | Connection is already active or an attempt is in progress. |
+| **10** | Aborted | Reconnection loop was interrupted via `Disconnect()`. |
+
+---
+
+#### Custom Authorization logic
+
+If you want to implement your own credential validation during the handshake, simply define the following method in your class derived from `EUserServer`:
+
+```csharp
+protected Task<byte> Authorization(T credentials)
+{
+    // Your logic: check database, verify tokens, etc.
+    // Return 0 for Success, or any value > 10 for failure (reported to the client).
+    return Task.FromResult((byte)0);
+}
+
+```
+
+* **Optional:** If you do not define this method, the library will skip the authorization step and allow all connections that pass the cryptographic handshake.
+* **Flexible Types:** The input parameter type `T` must match the object type returned by the client's `GetAuthorization()` method.
+* **Return Codes:** Any value returned that is greater than `0` will be sent back to the client as a status code, terminating the connection.
+
+#### 🛡️ Authorization & Reconnection Security
+
+When a client uses the **Auto Reconnect** feature, the library ensures that security is never compromised.
+
+* **Mandatory Re-Authorization:** Every time a client attempts to reconnect and resume a session, the `protected Task<byte> Authorization(T credentials)` method is executed again (if defined).
+* **Identity Verification:** This mechanism is crucial to prevent unauthorized users from hijacking an existing session. Even if a malicious actor attempts to resume a session by providing a valid `TokenToReconnect`, they must still pass your custom `Authorization` logic with the correct credentials.
+* **State Consistency:** By re-verifying the user during each reconnect, you ensure that the person accessing the persisted session data (like `Permissions` or `Inventory` in your custom `EUserServer`) is the same person who originally created the session.
+
+> [!CAUTION]
+> **Security Warning:** Always validate that the credentials provided during reconnection match the original session owner. If the `Authorization` method returns a non-zero value during a reconnect attempt, the library will immediately terminate the connection and mark the session as inaccessible for that attempt.
+
+### 🛑 Disconnect & Resource Cleanup
+
+#### Client Reusability
+
+The `EUserClient` (or your custom class) is **reusable**. When you call `client.Disconnect()`, the library cleans up the internal state and prepares the object for a fresh connection. You do **not** need to create a new object to log in as a different user.
+
+#### Server-Side Session & Auto-Instances
+
+Unlike the client, `EUserServer` instances are **not reusable**.
+
+* **Status: Dead** - Once a session status changes to `Dead`, the object is finished. The user associated with it will never return to this specific instance.
+* **Automatic Instance Cleanup** - When a session becomes `Dead`, the library automatically "unhooks" the logic instances (e.g., `GameService`) associated with that user.
+
+### ⚠️ Critical: Memory Management & Resource Disposal
+
+Managing unmanaged resources (e.g., timers, database connections, or manual event subscriptions) requires special attention because **automatic logic instances do not have their own disconnection hooks.**
+
+#### The Problem
+
+When a session becomes `Dead`, the library detaches the logic instances (like `GameService`). However, if a logic instance holds an active resource (like a running `System.Timers.Timer`), that resource remains rooted in memory by the system. Since the instance is now detached and "blind" to the session's end, it will never stop the resource, leading to a **permanent memory leak**.
+
+#### The Solution: The "Resource Anchor" Pattern
+
+The `EUserServer` object is the **only** component with a guaranteed `OnDisconnected` lifecycle trigger. You should bridge your resources from the logic instance to the user object or other managed place.
+
+**Recommended Implementation:**
+
+```csharp
+// 1. The Anchor Class (EUserServer)
+public class MyUserServer : EUserServer
+{
+    // A collection to hold resources needing manual disposal
+    public List<IDisposable> ResourcesToDispose { get; } = new();
+
+    public MyUserServer(ESocketResourceServer srs) : base(srs) { }
+
+    protected override void OnDisconnected()
+    {
+        // 3. The only guaranteed place to clean up everything
+        foreach (var resource in ResourcesToDispose)
+        {
+            try { resource.Dispose(); } catch { /* Log error */ }
+        }
+        ResourcesToDispose.Clear();
+    }
+}
+
+// 2. The Logic Class
+public class GameService
+{
+    // Instance-level state
+    private System.Timers.Timer? MyTimer { get; set; }
+
+    public void StartSensitiveTask(MyUserServer user)
+    {
+        if (MyTimer == null)
+        {
+            MyTimer = new System.Timers.Timer(1000);
+            
+            // IMPORTANT: Anchor the resource to the user object immediately.
+            // This ensures that when the user disconnects, this timer is stopped/disposed.
+            user.ResourcesToDispose.Add(MyTimer);
+        }
+        
+        MyTimer.Start();
+    }
+}
+
+```
+
+This pattern is also applicable to the client side. Since session instances are cleared automatically, you must ensure all resources are properly disposed of to prevent memory leaks.
+
+> [!CAUTION]
+> **Why is this necessary?** Even if you don't keep a reference to a `Timer` or `Socket` in a static list, the .NET Runtime itself might keep them alive while they are active. Always use the `EUserServer.OnDisconnected()` method to explicitly shut down these resources.
+
+## 📤 Sending Messages
+
+EnjoySockets offers different sending strategies optimized for the specific roles of the Client and the Server.
+
+### Core Sending Methods
+
+Both sides share a consistent API for basic communication:
+
+* `user.Send("Target", data);` - Sends a message with a payload.
+* `user.Send("Target");` - Sends a signal without a payload.
+* `user.Send(instanceId, "Target", data);` - Routes a message to a specific object instance.
+
+---
+
+### 🖥️ Server-Side: Built for High Throughput
+
+On the server, performance is the absolute priority. The library focuses on pushing data to the OS socket buffer as fast as possible.
+
+* **Non-blocking:** The `Send` method returns a `bool` immediately, indicating if the data was successfully buffered.
+* **Pre-serialized Buffers:** For maximum efficiency (e.g., in **Multicast** scenarios), the server can send raw `ReadOnlyMemory<byte>`. This avoids redundant serialization when sending the same data to thousands of clients.
+
+```csharp
+// Multicast example
+var serializedData = ESerial.Serialize(myObject);
+foreach (var user in connectedUsers)
+{
+    user.Send("Target", serializedData); // Extremely fast, no re-serialization
+}
+
+```
+
+---
+
+### 🌐 Client-Side: Reliability & Flow Control
+
+The client features a more sophisticated transmission engine designed to handle real-world network instability.
+
+#### ⚖️ Smart Flow Control
+
+The library monitors the server's capacity and internal buffers. It automatically throttles outgoing messages if there is a risk of overwhelming the server. This mechanism ensures that you should never encounter a "Buffer Full" error under normal conditions.
+
+> [!TIP]
+> Ensure that **ETCPConfig.MessageBuffer** is set to the same value on both the client and server sides.
+
+#### 🔄 Reliable Requests: `SendWithResponse`
+
+Unlike a standard fire-and-forget `Send`, `SendWithResponse` is an advanced RPC-like tool that returns a `long` status or ID.
+
+* **Guaranteed Execution:** If the connection drops after calling `SendWithResponse`, the library tracks the message state. Once reconnected, it ensures the message is delivered and the response is retrieved.
+* **State Persistence:** Even if the client is temporarily offline, the server continues processing the logic to ensure a consistent result is ready when the client returns.
+* **Result Codes:**
+* `0` and above: Success (often used for IDs or custom status codes).
+* `-2`: Buffer full (system-level error).
+* `-3`: **Session Expired.** The response could not be retrieved because the session was permanently closed (e.g., via `Disconnect()` or a `KeepAlive` timeout).
+
+> [!IMPORTANT]
+> **Keep-Alive Tuning:** To ensure `SendWithResponse` can recover from longer outages, make sure `ETCPServerConfig.KeepAlive` is set to a value that allows your clients enough time to reconnect and claim their pending responses.
+
+---
+
+### 💡 Why use `SendWithResponse`?
+
+It is the perfect choice for critical operations where you cannot afford to lose track of the result, such as:
+
+1. **Object Registration:** Creating a new entity on the server and needing its `instanceId`.
+2. **Transactions:** Adding an item to an inventory and waiting for confirmation.
+3. **Complex Handshakes:** Any logic that requires a reliable "Acknowledge" from the server.
