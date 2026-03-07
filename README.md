@@ -614,3 +614,271 @@ It is the perfect choice for critical operations where you cannot afford to lose
 1. **Object Registration:** Creating a new entity on the server and needing its `instanceId`.
 2. **Transactions:** Adding an item to an inventory and waiting for confirmation.
 3. **Complex Handshakes:** Any logic that requires a reliable "Acknowledge" from the server.
+
+## 📥 Receiving Messages
+
+To handle incoming data, you create **Access Points** (methods) with a specific signature. The library automatically maps incoming messages to these methods based on their names.
+
+### Method Signature Requirements
+
+1. **First Parameter (Mandatory):** Must be `EUser` or any derived type (e.g., `MyUserServer` or `MyUserClient`).
+2. **Second Parameter (Optional):** A single object of any type supported by **MemoryPack**. Only one payload parameter is allowed.
+3. **Return Types:**
+* **Server-side:** `void`, `Task`, `long`, or `Task<long>`.
+* **Client-side:** `void` or `Task` (clients do not return values to the server).
+
+
+4. **No `async void`:** Methods marked as `async void` are not supported and will not be mapped.
+
+---
+
+### 🛠️ The `EAttr` Attribute (Execution Control)
+
+You can control how each method (or an entire class) behaves using the `[EAttr]` attribute. If applied to a class, all methods within it inherit the configuration unless overridden by a specific attribute on the method itself.
+
+#### Key Properties:
+
+* **`Access` (long):** A custom identifier used to verify if a user can call this method. Logic is handled via `OnCheckAccess` in your `EUserServer` class.
+* **`MaxParamSize` (int):** The maximum allowed size (in bytes) of the serialized parameter. Essential for protecting against large-payload attacks.
+* **`PoolId` (ushort):** Specifies which Object Pool configuration to use for the parameter (optimized memory usage).
+* **`ChannelId` (ushort):** Defines the **Execution Channel**. By default, messages are executed sequentially on a single thread (Channel 0). Custom channels allow for parallel or private execution flows.
+
+---
+
+### 📋 Configuration Strategy
+
+For better maintainability, it is recommended to define your IDs in centralized static classes using `[EAttrChannel]` and `[EAttrPool]`.
+
+```csharp
+public static class ChannelIDs
+{
+    [EAttrChannel(ChannelType = EChannelType.Private, ChannelTasks = 1)]
+    public const ushort Basic = 1;
+
+    [EAttrChannel(ChannelType = EChannelType.Share, ChannelTasks = 1)]
+    public const ushort SpecialShare = 2;
+}
+
+public static class PoolIDs
+{
+    [EAttrPool(MaxPoolObjs = 5000)]
+    public const ushort Basic = 1;
+
+    [EAttrPool(MaxPoolObjs = 100)]
+    public const ushort BasicMin = 2;
+}
+
+```
+
+### Example: Using Attributes and Inheritance
+
+You can define custom attribute presets to avoid repetitive code:
+
+```csharp
+// 1. Custom Attribute Preset (Inherits from EAttr)
+public class EAttrCustom : EAttr
+{
+    public EAttrCustom() 
+    {
+        MaxParamSize = 1024;
+        Access = 5;
+        PoolId = PoolIDs.BasicMin;
+        ChannelId = ChannelIDs.Basic;
+    }
+}
+
+// 2. Implementation with Inheritance and Overrides
+[EAttr(MaxParamSize = 8100, Access = 10, PoolId = PoolIDs.Basic)]
+public class TestReceiveClass
+{
+    // MaxParamSize = 8100, Access = 2, PoolId = PoolIDs.Basic, ChannelId = ChannelIDs.SpecialShare
+    [EAttr(Access = 2, ChannelId = ChannelIDs.SpecialShare)]
+    public void MethodA(MyUserClient user, List<long> data)
+    {
+        // Inherits MaxParamSize and PoolId from class. Overrides Access and ChannelId.
+    }
+
+    // MaxParamSize = 16200, Access = 10, PoolId = PoolIDs.Basic, ChannelId = 0 (default)
+    [EAttr(MaxParamSize = 16200)]
+    public static void MethodB(MyUserClient user, List<long> data)
+    {
+        // Inherits Access and PoolId from class. Overrides MaxParamSize.
+    }
+
+    // MaxParamSize = 1024, Access = 5, PoolId = PoolIDs.BasicMin, ChannelId = ChannelIDs.Basic
+    [EAttrCustom]
+    public void MethodC(MyUserClient user, string message)
+    {
+        // Note: Since EAttrCustom sets ALL properties in its constructor, 
+        // it effectively overrides everything from the class level.
+    }
+}
+
+```
+
+---
+
+### 💡 Why use Channels and Pools?
+
+* **Channels:** Prevent "bottlenecks". A slow database save in one channel won't stop fast movement updates in another.
+* **Pools:** Drastically reduce **GC Pressure**. Instead of creating new objects for every message, the library reuses them from the pool.
+* **Access IDs:** Simplify permission management. You can check a user's database-stored rank against the `Access` ID in one central method.
+
+---
+
+## 🧩 Instance Architecture
+
+EnjoySockets routing is **name-based**. To ensure your logic executes correctly, you must follow one golden rule:
+
+> [!WARNING]
+> **Unique Method Names:** Every access point (method) must have a unique name across your entire project. If multiple methods share the same name, the library will only map the first one it encounters during the scanning process.
+
+---
+
+### 🏛️ Three Ways to Handle Logic
+
+You can organize your code using three distinct patterns, depending on whether you need shared state or private session data.
+
+1. **Static Logic (Global):** Shared across all sockets. Best for global systems (e.g., a world chat or global stats).
+2. **Auto-Private Instances (Stateful):** Automatically created for each socket. Requires a **parameterless constructor** and at least one valid non-static access method.
+3. **Hybrid Approach:** A single class containing both static and instance methods.
+
+#### Example: Static vs. Auto-Private
+
+```csharp
+public class PlayerService
+{
+    // GLOBAL: Shared by all players
+    private static int _totalPlayersOnline;
+
+    // PRIVATE: Unique to every connected socket
+    private int _localActionCount = 0;
+
+    public PlayerService() { /* Library calls this automatically */ }
+
+    // This is a global access point
+    public static void GetGlobalStats(MyUserServer user)
+    {
+        user.Send("OnStatsReceived", _totalPlayersOnline);
+    }
+
+    // This is a private access point (Stateful)
+    public void PerformAction(MyUserServer user)
+    {
+        _localActionCount++;
+        Console.WriteLine($"User {user.EndPointSocket} performed {_localActionCount} actions.");
+    }
+}
+
+```
+
+### 🚀 Registered Instances (`InstanceRegister`)
+
+Sometimes, "one instance per type" isn't enough. For example, if a user is participating in **two different matches** simultaneously, both handled by the same `GameService` class.
+
+By using `user.InstanceRegister(object)`, you gain total control:
+
+* **Custom Constructors:** You can pass any parameters to your instance before registering it.
+* **Multiple Instances:** You can register multiple objects of the same type for a single user.
+* **Instance IDs:** The method returns a `long` ID. You use this ID to route messages to that specific object.
+
+#### Registered Instances in Practice
+
+The most common use case for `InstanceRegister` is when a client needs to interact with a specific object on the server (e.g., a specific Match, Trade, or Dialogue session).
+
+##### 1. Server-Side: Registration & ID Delivery
+
+The server creates the instance and returns the unique ID to the client. Using `SendWithResponse` on the client side is the cleanest way to handle this.
+
+```csharp
+// Server-side logic (e.g., in a LobbyService)
+public class PlayerMatchService
+{
+	List<long> _currentMatches = new();
+	
+	public long CreateMatch(MyUserServer user, string mapName)
+	{
+		// 1. Create the specific instance
+		var newMatch = new GameMatch(mapName);
+		
+		// 2. Register it and get the unique ID for THIS user
+		long instanceId = user.InstanceRegister(newMatch);
+		
+		_currentMatches.Add(instanceId);
+		
+		// 3. Return the ID so the client knows how to address this match
+		return instanceId; 
+	}
+}
+
+```
+
+##### 2. Client-Side: Interaction using the ID
+
+Once the client has the ID, they can target that specific instance on the server.
+
+```csharp
+// Client-side logic
+public async Task StartGame()
+{
+    // A. Request match creation and get the ID back
+    long matchId = await client.SendWithResponse("CreateMatch", "CyberCity");
+
+    if (matchId > 0)
+    {
+        // B. Send messages directly to that specific GameMatch instance on the server
+        client.Send(matchId, "JoinTeam", "Blue");
+        client.Send(matchId, "ReadyUp");
+    }
+}
+
+```
+
+#### 💡 Why this is powerful?
+
+* **No Ambiguity:** The client can be part of multiple "Matches" or "Trades" at once. By passing the `instanceId`, the server knows exactly which object should handle the incoming `JoinTeam` or `ReadyUp` call.
+* **Encapsulation:** The `GameMatch` class doesn't need to know about other matches. It only cares about the logic for its specific instance.
+* **Memory Efficiency:** You only register what you need. When the match ends, a simple `user.InstanceRemove(matchId)` on the server cleans up the routing table for that user.
+
+#### Shared Registered Instances
+
+If you want multiple users to interact with the **same physical object**, simply register that object for each user.
+
+* Each user will get a **unique ID** for that shared object within their own session.
+* This is perfect for "Rooms" or "Party" logic where a single `Match` object is shared among 4 players.
+
+#### Cleanup
+
+* `user.InstanceRemove(id)`: Removes a specific registered instance.
+* `user.InstanceDetach()`: Clears **all** registered instances for that user.
+
+> [!NOTE]
+> **Important:** Even if multiple users are in the same `GameMatch` object, each user will have their own unique `instanceId` mapping to it. This keeps the internal routing table of each `EUserServer` fast and isolated.
+
+### 🧬 Inheritance in Instances
+
+EnjoySockets supports class inheritance, making it easy to extend logic without breaking your routing.
+
+1. **The "Most Derived" Rule:** If you have a class hierarchy, the library will map methods found **furthest from the base class**.
+2. **Auto-Instances:** The library will always instantiate the most derived class that meets the "Auto-Instance" criteria (parameterless constructor + valid methods).
+
+#### Example: Inheritance Mapping
+
+```csharp
+public class BaseLogic 
+{
+    public virtual void OnPing(MyUserServer user) => Console.WriteLine("Base Ping");
+}
+
+public class AdvancedLogic : BaseLogic
+{
+    // The library will map THIS method because it's further from the base
+    public override void OnPing(MyUserServer user) => Console.WriteLine("Advanced Ping!");
+    
+    public void OnSpecialAction(MyUserServer user) { /* ... */ }
+}
+
+```
+
+> [!TIP]
+> When using `InstanceRegister()`, you can pass any object from your inheritance tree. As long as it has at least one valid, non-static access method, the library will handle the routing perfectly.
