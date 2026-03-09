@@ -18,6 +18,25 @@ While working on numerous client-server projects, I often found myself lacking a
 * ⚖️ **Resource Control:** Robust flow control using `System.Threading.Channels` and object pooling.
 * 🔌 **Non-invasive:** Designed for easy adoption into existing codebases without major refactoring.
 
+## Contents
+
+**Basics**
+
+* [Serialization](#serialization) &nbsp;&nbsp;|&nbsp;&nbsp; [Installation](#installation) &nbsp;&nbsp;|&nbsp;&nbsp; [Compatibility & Performance](#compatibility--performance) &nbsp;&nbsp;|&nbsp;&nbsp; [Native AOT Configuration](#native-aot-configuration) &nbsp;&nbsp;|&nbsp;&nbsp; [Quick Start](#quick-start)
+
+---
+
+**Doc**
+
+* [Encryption & Security](#-encryption--security) &nbsp;&nbsp;|&nbsp;&nbsp; [Customizing User Classes](#customizing-user-classes) &nbsp;&nbsp;|&nbsp;&nbsp; [Connection Management](#-connection-management) &nbsp;&nbsp;|&nbsp;&nbsp; [Sending Messages](#-sending-messages) &nbsp;&nbsp;|&nbsp;&nbsp; [Receiving Messages](#-receiving-messages) &nbsp;&nbsp;|&nbsp;&nbsp; [Instance Architecture](#-instance-architecture) &nbsp;&nbsp;|&nbsp;&nbsp; [Object Pooling](#object-pooling) &nbsp;&nbsp;|&nbsp;&nbsp; [Flow Control Channels](#-flow-control-channels)
+
+---
+
+**Other**
+
+* [Multicasting](#-multicasting) &nbsp;&nbsp;|&nbsp;&nbsp; [Scalability & Distributed Systems](#-scalability--distributed-systems)
+
+
 ## Serialization
 
 The library leverages the **MemoryPack** engine by [neuecc](https://github.com/neuecc) to ensure the most efficient serialization possible. 
@@ -134,7 +153,6 @@ static class ExampleReceiveClassClient
 }
 
 ```
-
 ## 🔐 Encryption & Security
 
 EnjoySockets implements a hybrid encryption stack to ensure data confidentiality, integrity, and authenticity. It combines **RSA** (identity/handshake), **ECDH** (key exchange), and **AES-256-GCM** (transport encryption).
@@ -207,7 +225,7 @@ public class MyEnterpriseERSA : ERSA
 > * **Compatibility:** While you can use any key length, both the Client and Server implementations must be cryptographically compatible (e.g., matching padding and hashing algorithms).
 > * **Security:** You are responsible for the entropy, key storage, and overall security of your custom implementation.
 
-## 🛠️ Customizing User Classes
+## Customizing User Classes
 
 EnjoySockets is built for extensibility. By inheriting from `EUserClient` and `EUserServer`, you can manage session states, authentication, and connection lifecycles.
 
@@ -882,3 +900,261 @@ public class AdvancedLogic : BaseLogic
 
 > [!TIP]
 > When using `InstanceRegister()`, you can pass any object from your inheritance tree. As long as it has at least one valid, non-static access method, the library will handle the routing perfectly.
+
+## Object Pooling
+
+To reduce **GC (Garbage Collector) pressure** and achieve high-performance data processing, EnjoySockets features a built-in object pooling system. This allows the library to recycle objects instead of allocating new memory every time a message is received.
+
+### Registering a Pool
+
+To register a pool, define a `const ushort` variable anywhere in your code and mark it with the `[EAttrPool]` attribute. It is highly recommended to group these IDs within a single static class for better maintainability.
+
+```csharp
+public static class PoolIDs
+{
+    // MaxPoolObjs defines the limit of objects held in the pool.
+    // Setting it >0
+    [EAttrPool(MaxPoolObjs = 5000)]
+    public const ushort Basic = 1;
+
+    [EAttrPool(MaxPoolObjs = 100)]
+    public const ushort LargeBuffers = 2;
+}
+
+```
+
+### **Usage Example**
+
+Applying a pool to a method is straightforward. Simply reference your predefined `PoolId` within the `[EAttr]` attribute:
+
+```csharp
+// Example: Applying the 'LargeBuffers' pool to a specific access point
+[EAttr(PoolId = PoolIDs.LargeBuffers)]
+public static void ProcessLargeData(MyUserServer user, List<long> data)
+{
+    // 'data' is automatically retrieved from the pool.
+    // Ensure you do not store a reference to 'data' outside this method!
+}
+
+```
+
+> [!WARNING]
+> **Unique Identifiers:** Pool IDs must be unique. If two constants share the same ID, only one will be mapped by the library.
+
+---
+
+### ⚠️ Critical Rules for Pooling
+
+Object pooling is powerful but requires strict adherence to memory safety:
+
+1. **Lifecycle:** An object taken from the pool is **automatically returned** to the pool as soon as the receiving method finishes execution.
+2. **No Persistent References:** **NEVER** store a reference to a pooled object (e.g., in a static list or a class field) after the method ends. Since the object is recycled, its data will be overwritten by the next incoming message, leading to unpredictable bugs and data corruption.
+3. **Persistence Strategy:** If you need to keep the data from a pooled object, you must **copy the data** to a new instance or simply disable pooling for that specific access point.
+
+---
+
+### 🔍 Optimization Guide: What to Pool?
+
+Not all types benefit equally from pooling. Follow these guidelines to maximize efficiency:
+
+* **Classes & Lists (Best Choice):** This is where pooling shines. `List<T>` is particularly effective because the library reuses the internal buffer without re-allocating it.
+* **Immutable Types (Do Not Pool):** Types like `string`, `DateTime`, or `Guid` should not be pooled. Because they are immutable, they are always re-allocated during deserialization anyway.
+* **Hybrid Classes:** If you have a class containing a `string` and a `List<int>`, pooling the class is still beneficial. While the string will be a new allocation, the class shell and the list structure will be reused.
+* **Primitives (`int`, `long`, etc.):** Generally not worth pooling directly.
+* *Pro Tip:* For **Zero-Allocation** targets, wrap primitives in a class. Deserializing a raw primitive always costs a few bytes of allocation, but using a pooled class wrapper allows for a completely zero-allocation flow.
+
+### Lists vs. Arrays
+
+While the library supports pooling for arrays (`T[]`), they are only recycled if the incoming data length **exactly matches** the array size in the pool.
+
+* **Recommendation:** Always prefer `List<T>` over arrays for receiving data. Lists are much more flexible and are reused efficiently regardless of the number of elements they contain.
+
+> [!TIP]
+> For deeper technical insights into how memory is managed during deserialization, refer to the **MemoryPack** documentation, which serves as the core engine for EnjoySockets.
+
+## 🚦 Flow Control: Channels
+
+Channels are a powerful tool used to control how many methods are processed concurrently. They allow you to maximize server performance by ensuring that "heavy" operations (like database I/O or intensive CPU tasks) do not block the rest of your system.
+
+By using channels, you can isolate different parts of your logic into separate execution pipelines.
+
+### Channel Types
+
+1. **Private:** This channel is scoped to a **single socket (user)**. If a user sends multiple requests to a method on a private channel, those requests are queued and processed specifically for that user.
+2. **Share (Global):** This channel is **shared across all sockets** on the entire server. It creates a single, global queue for all users. This is primarily used on the server side to manage shared resources.
+
+> [!NOTE]
+> **Default Behavior:** If no channel is specified for a method, the library automatically uses a **Private channel with 1 task**.
+
+### Channel Registration
+
+Channels are registered using a `const ushort` with the `[EAttrChannel]` attribute. You can define the type and the number of concurrent tasks allowed.
+
+```csharp
+public static class ChannelIDs
+{
+    // Each user has their own sequential queue for basic actions
+    [EAttrChannel(ChannelType = EChannelType.Private, ChannelTasks = 1)]
+    public const ushort Basic = 1;
+
+    // A global shared queue for operations involving shared data (e.g., Products)
+    [EAttrChannel(ChannelType = EChannelType.Share, ChannelTasks = 1)]
+    public const ushort InventorySync = 2;
+}
+
+```
+
+### 🛡️ The "Lock-Free" Pattern (Shared Sequential Execution)
+
+One of the most efficient ways to use channels is setting `ChannelType = EChannelType.Share` with `ChannelTasks = 1`.
+
+This configuration acts as a **global serialized queue**. When multiple methods (even in different classes) are assigned to this channel, the library ensures that only **one method is executed at a time across the entire server**. This eliminates the need for manual `lock` statements, which reduces thread contention and improves performance under high load.
+
+#### Example: Thread-Safe Inventory Management
+
+In this example, we manage a global product list. By using a shared channel with one task, we don't need to use `lock` inside our methods.
+
+```csharp
+public static class ProductService
+{
+    // This list is shared across all users. 
+    // Usually, we would need a lock() to modify it safely.
+    private static readonly List<string> GlobalProducts = new();
+
+    // All three methods share ChannelIDs.InventorySync (Share, Task = 1)
+    
+    [EAttr(ChannelId = ChannelIDs.InventorySync)]
+    public static void AddProduct(MyUserServer user, string name)
+    {
+        // No lock needed! The channel ensures sequential access.
+        GlobalProducts.Add(name);
+        user.Send("OnProductAdded", true);
+    }
+
+    [EAttr(ChannelId = ChannelIDs.InventorySync)]
+    public static void RemoveProduct(MyUserServer user, string name)
+    {
+        // No lock needed!
+        GlobalProducts.Remove(name);
+        user.Send("OnProductRemoved", true);
+    }
+
+    [EAttr(ChannelId = ChannelIDs.InventorySync)]
+    public static void GetProductCount(MyUserServer user)
+    {
+        // Even reading is safe because no 'Add' or 'Remove' can happen simultaneously.
+        user.Send("OnCountReceived", GlobalProducts.Count);
+    }
+}
+
+```
+
+### 💡 Advanced: Shared Channels in Instance Methods
+
+It is important to note that **`EChannelType.Share` is not limited to `static` methods.** You can apply it to instance methods as well, including those within **automatic private instances**.
+
+Even if every user has their own separate instance of a class, if a method within that class is marked with a **Shared Channel**, the library will force a single, global queue for that method across **all users and all instances**.
+
+#### Example: Instance-based Global Queue
+
+Imagine every user has a `TradeService` instance, but the actual execution of a trade must be serialized globally to prevent race conditions in your database.
+
+```csharp
+public class TradeService
+{
+    // Even though this is an instance method and every user has their own TradeService...
+    [EAttr(ChannelId = ChannelIDs.GlobalTradeLock)] 
+    public void ExecuteTrade(MyUserServer user, TradeRequest request)
+    {
+        // ...this code will only run for ONE user at a time globally 
+        // because ChannelIDs.GlobalTradeLock is EChannelType.Share with 1 task.
+    }
+}
+
+```
+
+This hybrid approach gives you the best of both worlds: you can keep your logic organized in instances while still enforcing global synchronization where it matters most.
+
+### 💡 Why use Channels?
+
+* **Isolation:** A slow database query in an "Accounting" channel won't slow down the movement updates in a "Physics" channel.
+* **Performance:** Avoiding `lock` blocks reduces CPU context switching and prevents "Thread Starvation."
+* **Predictability:** You can strictly control how many resources are dedicated to specific types of incoming traffic.
+
+## 📢 Multicasting
+
+EnjoySockets **does not** include a built-in, "one-size-fits-all" multicast function. In complex systems, message routing logic (groups, permissions, instance visibility) varies so much that a generic implementation often becomes a bottleneck or a source of architectural "bloat."
+
+Instead, the library provides high-performance tools so you can build a multicast system tailored to your specific needs.
+
+### The Golden Rule: Serialize Once, Send Many
+
+The most common mistake in networking is serializing the same object multiple times for different recipients. To achieve maximum throughput, you should:
+
+1. Serialize your data **once** into a buffer.
+2. Iterate through your target users.
+3. Send the **raw bytes** using the specific `Send` overload.
+
+### High-Performance Serialization
+
+You have two ways to prepare your data for multicast:
+
+#### 1. Standard Serialization (Allocating)
+
+Best for quick operations or when the frequency of multicasts is low.
+
+```csharp
+var serializedData = ESerial.Serialize(myData); // Allocates a new byte array
+foreach (var user in roomUsers)
+{
+    user.Send("OnUpdate", serializedData);
+}
+
+```
+
+#### 2. Zero-Allocation Serialization (Recommended)
+
+For high-frequency updates (e.g., player positions), use `EArrayBufferWriter`. This avoids creating new objects for the Garbage Collector to clean up.
+
+```csharp
+// Define this outside your loop/method to reuse the memory
+private readonly EArrayBufferWriter _buffer = new(10 * 1024); // for example - 10KB initial capacity
+
+public void BroadcastToAll(IEnumerable<MyUserServer> users, MyData data)
+{
+    _buffer.ResetWrittenCount(); // Reset the writer without deallocating the internal array
+    ESerial.Serialize(_buffer, data);
+    
+    ReadOnlyMemory<byte> bytes = _buffer.WrittenMemory;
+
+    foreach (var user in users)
+    {
+        // High-speed transfer of raw memory
+        user.Send("OnUpdate", bytes);
+    }
+}
+
+```
+
+> [!TIP]
+> By using `EArrayBufferWriter` and the `ReadOnlyMemory<byte>` overload of `Send`, you bypass the serialization logic for every user in the loop. This can result **performance increase** for large groups.
+
+## 🌐 Scalability & Distributed Systems
+
+Currently, EnjoySockets is optimized for high-performance **Vertical Scaling**. Thanks to its memory-efficient architecture and low-level optimizations, a single instance can comfortably handle thousands of concurrent users depending on the complexity of your business logic.
+
+### Scaling Beyond a Single Server
+
+As your project grows, you may eventually reach the limits of vertical expansion (adding more CPU/RAM). In such cases, **Horizontal Scaling** (adding more server nodes) becomes necessary.
+
+* **Current Architecture:** At this stage, the library does not provide a built-in "out-of-the-box" distributed system (like automatic state synchronization across nodes).
+* **Standard Approach:** For distributed environments, it is recommended to treat each server instance as an independent node. Shared state should be managed via a common persistence layer, such as a centralized SQL database or a distributed NoSQL solution (e.g., Redis for session state, MongoDB for persistence).
+* **Infrastructure Requirements:** Moving to a distributed system requires appropriate IT infrastructure to manage server health, load balancing, and database synchronization.
+
+### Proxy & Custom Solutions
+
+The library's high performance and flexible routing make it an excellent choice for building **custom proxy or gateway nodes**. You can use EnjoySockets to create a lightweight entry point that routes traffic to various backend microservices based on your specific requirements.
+
+### Future Roadmap
+
+Distributed systems are complex and highly dependent on individual use cases. If there is significant community demand for built-in distributed features (such as a cluster provider or message bus integration), I am open to developing these modules as the library evolves.
