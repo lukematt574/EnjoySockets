@@ -118,6 +118,8 @@ var client = new EUserClient(new(pemKeyPublic, pemKeyPublicSign));
 if(await client.Connect(EAddress.Get()) == 0)
 	await client.Send("TestMethod");
 
+Console.ReadKey();
+
 static class ExampleReceiveClassClient
 {
     static void ResponseTestMethod(EUserClient user, int luckyNumber)
