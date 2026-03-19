@@ -89,24 +89,16 @@ using EnjoySockets;
 string pemKeyPrivate = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 string pemKeyPrivateSign = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 
-Console.WriteLine("Starting Server...");
-
 var server = new ETCPServer(new(pemKeyPrivate, pemKeyPrivateSign));
-
-if (server.Start(EAddress.Get()))
-    Console.WriteLine("Server started successfully!");
-else
-    Console.WriteLine("Failed to start server.");
+server.Start(EAddress.Get());
 
 Console.ReadKey();
 
-// Logic class: Methods are automatically invoked based on the message name sent by the client.
 static class ExampleReceiveClassServer
 {
     static void TestMethod(EUserServer user)
     {
-        Console.WriteLine("Received 'TestMethod' from client. Sending response...");
-        _ = user.Send("ResponseTestMethod", Random.Shared.Next());
+        user.Send("ResponseTestMethod", Random.Shared.Next());
     }
 }
 
@@ -121,29 +113,11 @@ using EnjoySockets;
 string pemKeyPublic = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 
-Console.WriteLine("Starting Client...");
-
 var client = new EUserClient(new(pemKeyPublic, pemKeyPublicSign));
 
-// Connect returns 0 on success
-byte connectResult = await client.Connect(EAddress.Get());
+if(await client.Connect(EAddress.Get()) == 0)
+	await client.Send("TestMethod");
 
-if (connectResult == 0)
-{
-    Console.WriteLine("Connected to server.");
-    // Sending a message that triggers 'TestMethod' on the server
-    await client.Send("TestMethod");
-}
-else
-{
-    Console.WriteLine($"Connection failed. Error code: {connectResult}");
-    Console.ReadKey();
-    return;
-}
-
-Console.ReadKey();
-
-// Logic class: Handles responses from the server.
 static class ExampleReceiveClassClient
 {
     static void ResponseTestMethod(EUserClient user, int luckyNumber)
@@ -609,6 +583,18 @@ The library monitors the server's capacity and internal buffers. It automaticall
 > [!TIP]
 > Ensure that **ETCPConfig.MessageBuffer** is set to the same value on both the client and server sides.
 
+#### ETCPConfig.MaxPacketSize
+
+`MaxPacketSize` defines the maximum packet size used for `socket.send` in bytes.  
+- Minimum: 1200 bytes  
+- Default: 1300 bytes  
+
+⚠️ **Important:** This value **must be the same** on both the client and the server.  
+A mismatch will cause protocol desynchronization and can lead to errors.
+
+> [!TIP]
+> For low latency, leave this parameter at its default value.
+
 #### 🔄 Reliable Requests: `SendWithResponse`
 
 Unlike a standard fire-and-forget `Send`, `SendWithResponse` is an advanced RPC-like tool that returns a `long` status or ID.
@@ -809,7 +795,7 @@ The most common use case for `InstanceRegister` is when a client needs to intera
 The server creates the instance and returns the unique ID to the client. Using `SendWithResponse` on the client side is the cleanest way to handle this.
 
 ```csharp
-// Server-side logic (e.g., in a LobbyService)
+// Server-side logic
 public class PlayerMatchService
 {
 	List<long> _currentMatches = new();
