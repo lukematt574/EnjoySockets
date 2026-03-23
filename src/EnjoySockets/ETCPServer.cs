@@ -5,12 +5,15 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace EnjoySockets
 {
     public sealed class ETCPServer : ETCPServer<EUserServer>
     {
+        public static bool IsJIT { get; internal set; } = RuntimeFeature.IsDynamicCodeSupported;
+
         /// <summary>
         /// Initializes an server instance configured to accept a specified number of clients,
         /// using the provided RSA keys for secure communication and the given server configuration.
@@ -188,11 +191,7 @@ namespace EnjoySockets
 
             try
             {
-                _servSocket = new(endPoint.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-                {
-                    ExclusiveAddressUse = true,
-                    NoDelay = true
-                };
+                _servSocket = new(endPoint.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
                 _servSocket.Bind(endPoint.EndPoint);
                 _servSocket.Listen(Config.QueueSocketToAccept);
                 _currentClients = 0;

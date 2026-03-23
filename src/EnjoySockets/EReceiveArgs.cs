@@ -10,14 +10,16 @@ namespace EnjoySockets
         public SocketAsyncEventArgs SAEA { get; private set; }
         public int MaxLengthArray { get; private set; } = 0;
 
-        readonly byte[] _array = new byte[ETCPSocket.MaxPacketSizeBytes];
-        readonly byte[] _arrayDecrypt = new byte[ETCPSocket.MaxPacketSizeBytes];
+        readonly byte[] _array;
+        readonly byte[] _arrayDecrypt;
         ManualResetValueTaskSourceCore<int> _mrvtsc;
         int _offsetMemory = 0;
         bool _softClose = false;
 
-        public EReceiveArgs()
+        public EReceiveArgs(ushort maxFullEncryptPacket)
         {
+            _array = new byte[maxFullEncryptPacket];
+            _arrayDecrypt = new byte[maxFullEncryptPacket];
             SAEA = new SocketAsyncEventArgs();
             SAEA.Completed += ReceiveCompleted;
             _mrvtsc = new ManualResetValueTaskSourceCore<int> { RunContinuationsAsynchronously = true };
@@ -70,16 +72,35 @@ namespace EnjoySockets
             return _array.AsMemory(0, MaxLengthArray);
         }
 
+        public ReadOnlySpan<byte> GetSaveBytesSpan()
+        {
+            return _array.AsSpan(0, MaxLengthArray);
+        }
+
         public ReadOnlyMemory<byte> GetSaveBytes(EAesGcm aes)
         {
-            var lengthData = MaxLengthArray - 28;
+            var lengthData = MaxLengthArray - ETCPSocket.PacketEncryptHeader;
             if (lengthData < 1)
                 return Memory<byte>.Empty;
             var buffer = _arrayDecrypt.AsMemory(0, lengthData);
-            if (aes.Decrypt(_array.AsSpan(0, 12), _array.AsSpan(28, lengthData), buffer.Span, _array.AsSpan(12, 16)))
+            Span<byte> src = _array;
+            if (aes.Decrypt(src.Slice(0, 12), src.Slice(ETCPSocket.PacketEncryptHeader, lengthData), buffer.Span, src.Slice(12, 16)))
                 return buffer;
             else
                 return Memory<byte>.Empty;
+        }
+
+        public ReadOnlySpan<byte> GetSaveBytesSpan(EAesGcm aes)
+        {
+            var lengthData = MaxLengthArray - ETCPSocket.PacketEncryptHeader;
+            if (lengthData < 1)
+                return Span<byte>.Empty;
+            var buffer = _arrayDecrypt.AsSpan(0, lengthData);
+            Span<byte> src = _array;
+            if (aes.Decrypt(src.Slice(0, 12), src.Slice(ETCPSocket.PacketEncryptHeader, lengthData), buffer, src.Slice(12, 16)))
+                return buffer;
+            else
+                return Span<byte>.Empty;
         }
 
         public void PrepareBuffer()

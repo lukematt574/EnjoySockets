@@ -1,7 +1,5 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
-using EnjoySockets.DTO;
-
 namespace EnjoySockets
 {
     public class ESocketResourceServer : ESocketResource
@@ -44,29 +42,32 @@ namespace EnjoySockets
             return false;
         }
 
-        private protected sealed override ERCell? GetReceiveCell(PartDataDTO dto)
+        private protected sealed override ERCell? GetReceiveCell(ReadOnlySpan<byte> dto)
         {
-            if (dto.TotalBytes > MessageBuffer)
+            var session = ReadSession(dto);
+            if (ReadTotalBytes(dto) > MessageBuffer)
             {
-                _ = SendSpecialWithCache(dto.Session, 4, null);
+                SendSpecialWithCache(session, 4, null);
                 return null;
             }
 
+            var instance = ReadInstance(dto);
+            var target = ReadTarget(dto);
             ERCell? rCell = null;
-            if (dto.Instance > 0)
+            if (instance > 0)
             {
                 lock (_Lock)
                 {
-                    if (_privateInstances.TryGetValue(dto.Instance, out (object, Dictionary<ulong, ERCell>) val))
-                        rCell = EReceiveCells.GetCellToInstanceId(val.Item1, dto.Target);
+                    if (_privateInstances.TryGetValue(instance, out (object, Dictionary<ulong, ERCell>) val))
+                        rCell = EReceiveCells.GetCellToInstanceId(val.Item1, target);
                 }
             }
             else
-                rCell = EReceiveCells.GetCellToBasic(dto.Target);
+                rCell = EReceiveCells.GetCellToBasic(target);
 
             if (rCell == null)
             {
-                _ = SendSpecialWithCache(dto.Session, 6, null);
+                SendSpecialWithCache(session, 6, null);
                 return null;
             }
 
@@ -99,11 +100,11 @@ namespace EnjoySockets
 
         private protected override void ClearReceiveDataSessions() { }
 
-        private protected sealed override void RunReceiveMsg(ERCell rCell, PartDataDTO dto)
+        private protected sealed override void RunReceiveMsg(ERCell rCell, ReadOnlySpan<byte> dto, ulong session)
         {
-            if (rCell.AttrMethod.MaxParamSize != 0 && dto.TotalBytes > rCell.AttrMethod.MaxParamSize)
+            if (rCell.AttrMethod.MaxParamSize != 0 && ReadTotalBytes(dto) > rCell.AttrMethod.MaxParamSize)
             {
-                _ = SendSpecialWithCache(dto.Session, 4, null);
+                SendSpecialWithCache(session, 4, null);
                 return;
             }
 
@@ -112,7 +113,7 @@ namespace EnjoySockets
             {
                 if (!(CheckAccessEvent?.Invoke(access) ?? false))
                 {
-                    _ = SendSpecialWithCache(dto.Session, 5, null);
+                    SendSpecialWithCache(session, 5, null);
                     return;
                 }
             }
@@ -123,12 +124,12 @@ namespace EnjoySockets
                 bool added = false;
                 lock (_Lock)
                 {
-                    if (ReceiveDataSessions.TryAdd(dto.Session, msg))
+                    if (ReceiveDataSessions.TryAdd(session, msg))
                         added = true;
                 }
                 if (!added)
                 {
-                    _ = SendSpecialWithCache(msg.Session, 6, null);
+                    SendSpecialWithCache(msg.Session, 6, null);
                     msg.Dispose();
                 }
                 else
@@ -136,11 +137,11 @@ namespace EnjoySockets
             }
             else
             {
-                _ = SendSpecialWithCache(dto.Session, 6, null);
+                SendSpecialWithCache(session, 6, null);
             }
         }
 
-        private protected sealed override void RunReceiveMsg(EReceiveData eData, PartDataDTO dto)
+        private protected sealed override void RunReceiveMsg(EReceiveData eData, ReadOnlySpan<byte> dto)
         {
             var result = TryPushReceiveDTO(eData, dto);
             if (result > 1)//over 1 - error
@@ -159,13 +160,13 @@ namespace EnjoySockets
         /// 1 = request session status,
         /// 2 = clear related session data.
         /// </remarks>
-        private protected sealed override bool ReceiveSpecial(PartDataDTO dto)
+        private protected sealed override bool ReceiveSpecial(ReadOnlySpan<byte> dto)
         {
-            switch (dto.Target)
+            switch (ReadTarget(dto))
             {
                 case 0: break;
-                case 1: ResponseStatusSession(dto.Session); break;
-                case 2: ClearReceiveDataSessions(dto.Session); break;
+                case 1: ResponseStatusSession(ReadSession(dto)); break;
+                case 2: ClearReceiveDataSessions(ReadSession(dto)); break;
             }
             return true;
         }
@@ -203,7 +204,7 @@ namespace EnjoySockets
                     }
                 }
             }
-            _ = SendSpecial(session, typeMsg, msg);
+            SendSpecial(session, typeMsg, msg);
         }
 
         internal override sealed void DisposeReceiveDataFromChannel(EReceiveData? eData)
@@ -219,7 +220,9 @@ namespace EnjoySockets
                 ReceiveDataSessions.Remove(eData.Session, out _);
                 ResponseCache.Add(eData.Session, typeMsg, eData.Response);
             }
-            _ = SendSpecial(eData.Session, typeMsg, eData.Response);
+            SendSpecial(eData.Session, typeMsg, eData.Response);
+            if (eData.CorruptedArg)
+                RunOnPotentialSabotageEvent?.Invoke(1);
             eData.Dispose();
         }
 
@@ -231,7 +234,7 @@ namespace EnjoySockets
         }
 
         int _maxSendSpecialCount;
-        int _limitSendSpecial = ETCPSocket.MaxCachedResponses * 2;
+        const int _limitSendSpecial = ETCPSocket.MaxCachedResponses * 2;
         internal override sealed ValueTask<bool> SendSpecial(ulong session, ulong typeMsg, long? msg)
         {
             if (BasicSocket == null)

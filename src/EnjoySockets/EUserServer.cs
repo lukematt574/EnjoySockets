@@ -32,7 +32,7 @@ namespace EnjoySockets
         public EUserServer(ESocketResourceServer eSocketResource) : base(eSocketResource)
         {
             eSocketResource.CheckAccessEvent = OnCheckAccess;
-            eSocketResource.RunOnPotentialSabotageEvent = RunOnPotentialSabotage;
+            eSocketResource.RunOnPotentialSabotageEvent = PotentialSabotage;
             eSocketResource.RunDisposeEvent = Dispose;
         }
 
@@ -227,8 +227,9 @@ namespace EnjoySockets
         /// <param name="msg">
         /// The code indicating the type of suspicious activity:
         /// <list type="table">
-        /// <item><term>1</term><description>The main object of the packet is corrupted.</description></item>
+        /// <item><term>1</term><description>Object arg method is corrupted.</description></item>
         /// <item><term>2</term><description>The client is not receiving data while continuously sending.</description></item>
+        /// <item><term> &gt;2</term><description>May be used for custom sabotage msg.</description></item>
         /// </list>
         /// </param>
         /// <remarks>
@@ -237,7 +238,10 @@ namespace EnjoySockets
         /// </remarks>
         protected virtual Task OnPotentialSabotage(int msg) { return Task.CompletedTask; }
 
-        private protected void RunOnPotentialSabotage(int msg)
+        /// <summary>
+        /// Disconnect and invoke OnPotentialSabotage method.
+        /// </summary>
+        public void PotentialSabotage(int msg)
         {
             Disconnect();
             _ = OnPotentialSabotage(msg);

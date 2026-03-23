@@ -27,7 +27,17 @@ namespace EnjoySockets
             Capacity = capacity;
         }
 
-        public EArrayBufferWriter Rent() => _pool.TryPop(out var s) ? s : new(Capacity);
+        public EArrayBufferWriter Rent()
+        {
+            if (_pool.TryPop(out var s))
+            {
+                s.ResetWrittenCount();
+                return s;
+            }
+            else
+                return new(Capacity);
+        }
+
         public void Return(EArrayBufferWriter? buffer)
         {
             if (buffer == null || buffer.Capacity != Capacity)

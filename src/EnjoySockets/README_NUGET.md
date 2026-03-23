@@ -57,26 +57,19 @@ EnjoySockets uses an intuitive routing engine: incoming messages are automatical
 using EnjoySockets;
 
 // You can generate a random key via ERSA.GeneratePrivatePublicPEM() or any other method.
-// Keys should be stored securely.
-string pemKeyPrivate = "-----BEGIN PRIVATE KEY-----...-----END PRIVATE KEY-----";
-string pemKeyPrivateSign = "-----BEGIN PRIVATE KEY-----...-----END PRIVATE KEY-----";
+string pemKeyPrivate = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
+string pemKeyPrivateSign = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 
 var server = new ETCPServer(new(pemKeyPrivate, pemKeyPrivateSign));
-
-if (server.Start(EAddress.Get()))
-    Console.WriteLine("Server started successfully!");
-else
-    Console.WriteLine("Failed to start server.");
+server.Start(EAddress.Get());
 
 Console.ReadKey();
 
-// Methods in logic classes are automatically invoked based on the message name string.
 static class ExampleReceiveClassServer
 {
     static void TestMethod(EUserServer user)
     {
-        Console.WriteLine("Received 'TestMethod'. Sending response...");
-        _ = user.Send("ResponseTestMethod", Random.Shared.Next());
+        user.Send("ResponseTestMethod", Random.Shared.Next());
     }
 }
 
@@ -88,27 +81,16 @@ static class ExampleReceiveClassServer
 using EnjoySockets;
 
 // Ensure these public keys match the private keys used by the server.
-string pemKeyPublic = "-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----";
-string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----";
+string pemKeyPublic = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
+string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 
 var client = new EUserClient(new(pemKeyPublic, pemKeyPublicSign));
-byte connectResult = await client.Connect(EAddress.Get());
 
-if (connectResult == 0)
-{
-    // Sending a message triggers 'TestMethod' on the server
-    await client.Send("TestMethod");
-}
-else
-{
-    Console.WriteLine($"Connection failed. Error code: {connectResult}");
-    Console.ReadKey();
-    return;
-}
+if(await client.Connect(EAddress.Get()) == 0)
+	await client.Send("TestMethod");
 
 Console.ReadKey();
 
-// Logic class: Handles responses from the server.
 static class ExampleReceiveClassClient
 {
     static void ResponseTestMethod(EUserClient user, int luckyNumber)

@@ -1,9 +1,7 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
-using EnjoySockets.DTO;
 using System.Buffers.Binary;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
 namespace EnjoySockets
@@ -18,26 +16,30 @@ namespace EnjoySockets
         /// <summary>
         /// Buffer in bytes
         /// </summary>
-        public int MessageBuffer { get; private set; }
+        internal int MessageBuffer { get; private set; }
+        internal ushort MaxEncryptPacket { get; private set; }
+        internal const ushort MinEncryptPacket = ETCPSocket.PacketEncryptHeader + ETCPSocket.PacketHeader;
         internal object? UserObj { get; set; }
 
         internal byte[] TokenToReconnect = new byte[32];
-        private protected PartDataDTO PreparedSendObj = new() { Data = new(ETCPSocket.MaxPayloadBytes) };
-        private protected EArrayBufferWriter ArrayBufferWriterSend = new(ETCPSocket.MaxPacketSizeBytes);
+        //private protected PartDataDTO PreparedSendObj = new() { Data = new(ETCPSocket.MaxPayloadBytes) };
+        private protected EArrayBufferPool _eArrayBufferPool = EArrayBufferPool.GetPool(ETCPSocket.MaxPacketSizeConnect);
+        //private protected EArrayBufferWriter ArrayBufferWriterSend = new();
         private protected ESerializeMsg ESerializeMsgObj;
 
         private protected EAesGcm AESgcm { get; private set; }
 
         private protected ulong LastSessionReceive;
-        private protected PartDataDTO? ReceivePartObj = new() { Data = new(ETCPSocket.MaxPayloadBytes + 50) };
+        //private protected PartDataDTO? ReceivePartObj = new() { Data = new(ETCPSocket.MaxPayloadBytes + 50) };
         private protected Dictionary<ulong, EReceiveMsg> ReceiveDataSessions = [];
 
         internal ESendChannel ChannelSend { get; private set; }
         private protected EReceiveChannel ChannelReceiveBasic { get; private set; }
         readonly Dictionary<ushort, EReceiveChannel> _privateChannels = [];
 
-        internal ESendArgs SendArgs { get; private set; } = new();
-        internal EReceiveArgs ReceiveArgs { get; private set; } = new();
+        internal ESendArgs SendArgs { get; private set; }
+        internal EReceiveArgs ReceiveArgs { get; private set; }
+        byte[] _sendBuffer;
 
         private protected ECDiffieHellman ECDH { get; private set; }
         internal ReadOnlyMemory<byte> PublicKey { get; private set; }
@@ -62,6 +64,10 @@ namespace EnjoySockets
             Config = config.Clone();
             MessageBuffer = Config.MessageBuffer * 1024;
             Heartbeat = Config.Heartbeat * 1000;
+            _sendBuffer = new byte[Config.MaxPacketSize];
+            MaxEncryptPacket = (ushort)(Config.MaxPacketSize + ETCPSocket.PacketEncryptHeader);
+            SendArgs = new((ushort)(MaxEncryptPacket + ETCPSocket.PacketPrefixLength));
+            ReceiveArgs = new(MaxEncryptPacket);
             SocketType = socketType;
             Ersa = rsa;
             _outPublicKey = ECDiffieHellman.Create(Config.Curve);
@@ -136,15 +142,17 @@ namespace EnjoySockets
         internal ValueTask<bool> SendPlainBytesObj<T>(T obj)
         {
             if (obj == null) return ValueTask.FromResult(false);
+            var buffer = _eArrayBufferPool.Rent();
             try
             {
-                if (ESerial.Serialize(ArrayBufferWriterSend, obj, obj.GetType()) == 0)
+                var payloadLength = ESerial.Serialize(buffer, obj, obj.GetType());
+                if (payloadLength == 0 || payloadLength > ETCPSocket.MaxPacketSizeConnect)
                     return ValueTask.FromResult(false);
-                return ETCPSocket.Send(BasicSocket, SendArgs, ArrayBufferWriterSend.WrittenMemory);
+                return ETCPSocket.Send(BasicSocket, SendArgs, buffer.WrittenMemory);
             }
             finally
             {
-                ArrayBufferWriterSend.ResetWrittenCount();
+                _eArrayBufferPool.Return(buffer);
             }
         }
 
@@ -154,15 +162,17 @@ namespace EnjoySockets
         internal ValueTask<bool> SendBytes<T>(T obj)
         {
             if (obj == null) return ValueTask.FromResult(false);
+            var buffer = _eArrayBufferPool.Rent();
             try
             {
-                if (ESerial.Serialize(ArrayBufferWriterSend, obj, obj.GetType()) == 0)
+                var payloadLength = ESerial.Serialize(buffer, obj, obj.GetType());
+                if (payloadLength == 0 || payloadLength > ETCPSocket.MaxPacketSizeConnect)
                     return ValueTask.FromResult(false);
-                return ETCPSocket.Send(BasicSocket, SendArgs, AESgcm, ArrayBufferWriterSend.WrittenMemory);
+                return ETCPSocket.Send(BasicSocket, SendArgs, AESgcm, buffer.WrittenMemory);
             }
             finally
             {
-                ArrayBufferWriterSend.ResetWrittenCount();
+                _eArrayBufferPool.Return(buffer);
             }
         }
 
@@ -227,8 +237,8 @@ namespace EnjoySockets
                         break;
                 }
 
-                var dataLength = BinaryPrimitives.ReadInt16LittleEndian(ReceiveArgs.GetSaveBytes().Span);
-                if (dataLength < 37 || dataLength > ETCPSocket.MaxPacketSizeBytes)
+                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(ReceiveArgs.GetSaveBytesSpan());
+                if (dataLength < MinEncryptPacket || dataLength > MaxEncryptPacket)
                     break;
 
                 //rest
@@ -241,12 +251,7 @@ namespace EnjoySockets
                         break;
                 }
 
-                var readBytes = ReceiveArgs.GetSaveBytes(AESgcm);
-
-                if (readBytes.Length < 37)
-                    break;
-
-                if (!PushReceivePart(readBytes))
+                if (!PushReceivePart(ReceiveArgs.GetSaveBytesSpan(AESgcm)))
                     break;
             }
 
@@ -258,46 +263,37 @@ namespace EnjoySockets
 
         private protected virtual void ClearReceiveDataSessions() { }
 
-        bool PushReceivePart(ReadOnlyMemory<byte> buffer)
+        bool PushReceivePart(ReadOnlySpan<byte> dto)
         {
-            var bufferSpan = buffer.Span;
-            if (bufferSpan[0] == 255 //Defensive check against obj null
-                || bufferSpan[36] == 255  //Defensive check against obj.list null
-                || !ESerial.Deserialize(bufferSpan, ref ReceivePartObj)
-                || ReceivePartObj?.Data == null)
-            {
-                if (ReceivePartObj?.Data == null)
-                    ReceivePartObj = new();
-
-                RunOnPotentialSabotageEvent?.Invoke(1);
+            if (dto.Length < ETCPSocket.PacketHeader)
                 return false;
-            }
 
-            if (ReceivePartObj.DForm == EDataForm.Special)
-                return ReceiveSpecial(ReceivePartObj);
+            if (dto[0] == (byte)EDataForm.Special)
+                return ReceiveSpecial(dto);
 
             EReceiveMsg? currentSession;
+            var session = ReadSession(dto);
             lock (_Lock)
-                ReceiveDataSessions.TryGetValue(ReceivePartObj.Session, out currentSession);
+                ReceiveDataSessions.TryGetValue(session, out currentSession);
 
             if (currentSession == null)
             {
-                if (ReceivePartObj.Session > LastSessionReceive)
-                    LastSessionReceive = ReceivePartObj.Session;
+                if (session > LastSessionReceive)
+                    LastSessionReceive = session;
                 else
                     return true;
 
-                var cell = GetReceiveCell(ReceivePartObj);
+                var cell = GetReceiveCell(dto);
                 if (cell != null)
-                    RunReceiveMsg(cell, ReceivePartObj);
+                    RunReceiveMsg(cell, dto, session);
             }
             else
-                RunReceiveMsg(currentSession, ReceivePartObj);
+                RunReceiveMsg(currentSession, dto);
 
             return true;
         }
 
-        internal long TryPushReceiveDTO(EReceiveData eData, PartDataDTO dto)
+        internal long TryPushReceiveDTO(EReceiveData eData, ReadOnlySpan<byte> dto)
         {
             var result = eData.TryPushPart(dto);
 
@@ -356,86 +352,56 @@ namespace EnjoySockets
             }
         }
 
-        private protected virtual ERCell? GetReceiveCell(PartDataDTO dto) { return null; }
-        private protected virtual void RunReceiveMsg(ERCell eData, PartDataDTO dto) { }
-        private protected virtual void RunReceiveMsg(EReceiveData eData, PartDataDTO dto) { }
-        private protected virtual bool ReceiveSpecial(PartDataDTO dto) { return true; }
+        private protected virtual ERCell? GetReceiveCell(ReadOnlySpan<byte> dto) { return null; }
+        private protected virtual void RunReceiveMsg(ERCell eData, ReadOnlySpan<byte> dto, ulong session) { }
+        private protected virtual void RunReceiveMsg(EReceiveData eData, ReadOnlySpan<byte> dto) { }
+        private protected virtual bool ReceiveSpecial(ReadOnlySpan<byte> dto) { return true; }
 
         internal ValueTask<bool> RunObjMsgSend(ESendMsg msg)
         {
-            try
-            {
-                if (msg.Session == 0) msg.Session = GetSession();
-                msg.FillList(PreparedSendObj.Data);
-                PreparedSendObj.TotalBytes = msg.TotalBytes;
-                PreparedSendObj.Session = msg.Session;
-                PreparedSendObj.DForm = EDataForm.Msg;
-                PreparedSendObj.Target = msg.Target;
-                PreparedSendObj.Instance = msg.Instance;
-                if (ESerial.Serialize(ArrayBufferWriterSend, PreparedSendObj) == 0)
-                    return ValueTask.FromResult(false);
-                return ETCPSocket.Send(BasicSocket, SendArgs, AESgcm, ArrayBufferWriterSend.WrittenMemory);
-            }
-            finally
-            {
-                PreparedSendObj.Data.Clear();
-                ArrayBufferWriterSend.ResetWrittenCount();
-            }
+            var sendBufferSpan = _sendBuffer.AsSpan();
+
+            sendBufferSpan[0] = (byte)EDataForm.Msg;
+            if (msg.Session == 0) msg.Session = GetSession();
+            WriteSession(sendBufferSpan, msg.Session);
+            WriteTotalBytes(sendBufferSpan, msg.TotalBytes);
+            WriteTarget(sendBufferSpan, msg.Target);
+            WriteInstance(sendBufferSpan, msg.Instance);
+            var payloadLength = msg.FillSpan(sendBufferSpan.Slice(ETCPSocket.PacketHeader));
+
+            SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader + payloadLength), AESgcm);
+            return ETCPSocket.Write(BasicSocket, SendArgs);
         }
 
-        readonly byte[] _memorySpecial = new byte[8];
         private protected ValueTask<bool> RunSpecialSend(ulong session, ulong typeMsg, long? msg)
         {
-            try
-            {
-                if (msg != null)
-                {
-                    PreparedSendObj.Data.AddRange(_memorySpecial);
-                    BinaryPrimitives.WriteInt64LittleEndian(CollectionsMarshal.AsSpan(PreparedSendObj.Data), (long)msg);
-                    PreparedSendObj.TotalBytes = 8;
-                }
-                else
-                    PreparedSendObj.TotalBytes = 0;
-                PreparedSendObj.Session = session;
-                PreparedSendObj.DForm = EDataForm.Special;
-                PreparedSendObj.Target = typeMsg;
-                PreparedSendObj.Instance = 0;
-                if (ESerial.Serialize(ArrayBufferWriterSend, PreparedSendObj) == 0)
-                    return ValueTask.FromResult(false);
-                return ETCPSocket.Send(BasicSocket, SendArgs, AESgcm, ArrayBufferWriterSend.WrittenMemory);
-            }
-            finally
-            {
-                PreparedSendObj.Data.Clear();
-                ArrayBufferWriterSend.ResetWrittenCount();
-            }
+            var sendBufferSpan = _sendBuffer.AsSpan();
+
+            sendBufferSpan[0] = (byte)EDataForm.Special;
+            WriteSession(sendBufferSpan, session);
+            WriteTarget(sendBufferSpan, typeMsg);
+            var payloadLength = WriteMsgToPayload(sendBufferSpan, msg);
+
+            SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader + payloadLength), AESgcm);
+            return ETCPSocket.Write(BasicSocket, SendArgs);
         }
 
         internal ValueTask<bool> RunHeartbeatSend()
         {
-            try
-            {
-                PreparedSendObj.TotalBytes = 0;
-                PreparedSendObj.Session = 0;
-                PreparedSendObj.DForm = EDataForm.Special;
-                PreparedSendObj.Target = 0;
-                PreparedSendObj.Instance = 0;
-                if (ESerial.Serialize(ArrayBufferWriterSend, PreparedSendObj) == 0)
-                    return ValueTask.FromResult(false);
-                return ETCPSocket.Send(BasicSocket, SendArgs, AESgcm, ArrayBufferWriterSend.WrittenMemory);
-            }
-            finally
-            {
-                PreparedSendObj.Data.Clear();
-                ArrayBufferWriterSend.ResetWrittenCount();
-            }
+            var sendBufferSpan = _sendBuffer.AsSpan();
+
+            sendBufferSpan[0] = (byte)EDataForm.Special;
+            WriteTarget(sendBufferSpan, 0);
+
+            SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader), AESgcm);
+            return ETCPSocket.Write(BasicSocket, SendArgs);
         }
 
-        ulong LastSessionToGet = (ulong)DateTime.UtcNow.Ticks;
+        private protected ulong LastSessionToGet = (ulong)DateTime.UtcNow.Ticks;
         /// <summary>
         /// Returns a unique session on socket
         /// </summary>
-        internal ulong GetSession()
+        internal virtual ulong GetSession()
         {
             return ++LastSessionToGet;
         }
@@ -580,5 +546,47 @@ namespace EnjoySockets
                 return ReceiveDataSessions.Count < 1;
             }
         }
+
+        #region Write and read section
+
+        internal static void WriteTotalBytes(Span<byte> buffer, int totalBytes) => BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(1, 4), totalBytes);
+
+        internal static void WriteSession(Span<byte> buffer, ulong session) => BinaryPrimitives.WriteUInt64LittleEndian(buffer.Slice(5, 8), session);
+
+        internal static void WriteInstance(Span<byte> buffer, long instance) => BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(13, 8), instance);
+
+        internal static void WriteTarget(Span<byte> buffer, ulong target) => BinaryPrimitives.WriteUInt64LittleEndian(buffer.Slice(21, 8), target);
+
+        internal static short WriteMsgToPayload(Span<byte> buffer, long? msg)
+        {
+            if (msg != null)
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(buffer.Slice(ETCPSocket.PacketHeader, 8), (long)msg);
+                return 8;
+            }
+            return 0;
+        }
+
+        internal static int ReadTotalBytes(ReadOnlySpan<byte> buffer) => BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(1, 4));
+
+        internal static ulong ReadSession(ReadOnlySpan<byte> buffer) => BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(5, 8));
+
+        internal static long ReadInstance(ReadOnlySpan<byte> buffer) => BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(13, 8));
+
+        internal static ulong ReadTarget(ReadOnlySpan<byte> buffer) => BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(21, 8));
+
+        internal static int ReadPayloadLength(ReadOnlySpan<byte> buffer) => buffer.Length - ETCPSocket.PacketHeader;
+
+        internal static ReadOnlySpan<byte> ReadPayload(ReadOnlySpan<byte> buffer) => buffer.Slice(ETCPSocket.PacketHeader);
+
+        internal static long? ReadMsgFromPayload(ReadOnlySpan<byte> buffer)
+        {
+            if (buffer.Length == 37)
+                return BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(ETCPSocket.PacketHeader, 8));
+
+            return null;
+        }
+
+        #endregion
     }
 }

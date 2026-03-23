@@ -24,42 +24,55 @@ namespace EnjoySockets
             obj.Msg?.Clear();
             obj.Msg = null;
             obj.MsgBytes = null;
+            obj.Session = 0;
             obj.Target = 0;
             obj.Instance = 0;
+            obj.TotalBytes = 0;
+            obj.Repeat = false;
             _pool.Push(obj);
         }
 
         ConcurrentDictionary<ulong, ESender> _buffer = new();
-        internal ESender Get(ulong session, int totalBytes)
+        internal ESender? Get(ulong session, int totalBytes)
         {
-            var obj = _buffer.GetOrAdd(session, GetESenderRun);
+            var obj = Rent();
+            obj.Reset();
+
+            obj.Session = session;
             obj.TotalBytes = totalBytes;
-            obj.Target = 0;
-            obj.Instance = 0;
+            obj.Repeat = false;
+
+            if (!_buffer.TryAdd(session, obj))
+            {
+                Return(obj);
+                return null;
+            }
             return obj;
         }
 
-        internal ESender Get(ulong session, ulong target, long instance, EMemorySegment? msg)
+        internal ESender? Get(ulong session, ulong target, long instance, EMemorySegment? msg)
         {
-            var obj = _buffer.GetOrAdd(session, GetESenderRun);
+            var obj = Rent();
+            obj.Reset();
+
+            obj.Session = session;
             obj.Target = target;
             obj.Msg = msg;
             obj.Instance = obj.Instance;
             obj.TotalBytes = msg?.WrittenBytes ?? 0;
+            obj.Repeat = true;
+
+            if (!_buffer.TryAdd(session, obj))
+            {
+                Return(obj);
+                return null;
+            }
             return obj;
         }
 
         internal List<ulong> GetNonReceivedSessions()
         {
             return [.. _buffer.Select(x => x.Key)];
-        }
-
-        internal static ESender GetESenderRun(ulong session)
-        {
-            var obj = Rent();
-            obj.Reset();
-            obj.Session = session;
-            return obj;
         }
 
         internal void Remove(ulong session)
@@ -73,10 +86,9 @@ namespace EnjoySockets
             if (offset == null)
                 return null;
 
-
             if (_buffer.TryGetValue(session, out ESender? sender))
             {
-                if (offset >= sender.TotalBytes || offset < 0 || (sender.Msg == null && sender.MsgBytes == null) || sender.Target == 0)
+                if (!sender.Repeat || offset < 0 || sender.Target == 0)
                 {
                     return null;
                 }
@@ -90,6 +102,16 @@ namespace EnjoySockets
             if (_buffer.TryGetValue(session, out ESender? sender))
             {
                 sender.SetResult(msg ?? 0);
+            }
+            else
+            {
+                if (_buffer.ContainsKey(session))
+                {
+                    while (!_buffer.TryGetValue(session, out sender))
+                        Thread.SpinWait(1);
+
+                    sender.SetResult(msg ?? 0);
+                }
             }
         }
 

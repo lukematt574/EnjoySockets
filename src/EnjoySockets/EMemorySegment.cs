@@ -39,27 +39,21 @@ namespace EnjoySockets
             return Rent();
         }
 
-        internal static EMemorySegment? FillToList(List<byte> list, EMemorySegment? segment, ref int offset, int maxRead)
+        internal static EMemorySegment? FillSpan(Span<byte> buffer, EMemorySegment? segment, ref int offset, int maxRead)
         {
             var current = segment;
-            int bytesRead = 0;
+            int bytesWritten = 0;
 
-            while (current != null && bytesRead < maxRead)
+            while (current != null && bytesWritten < maxRead)
             {
                 int available = current._usedBytes - offset;
                 if (available > 0)
                 {
-                    int toCopy = Math.Min(maxRead - bytesRead, available);
-#if NET8_0
-                    list.AddRange(current._buffer.AsSpan(offset, toCopy));
-#else
-                    var span = current._buffer.AsSpan(offset, toCopy);
-                    for (int i = 0; i < span.Length; i++)
-                        list.Add(span[i]);
-#endif
-                    bytesRead += toCopy;
+                    int toCopy = Math.Min(maxRead - bytesWritten, available);
+                    current._buffer.AsSpan(offset, toCopy).CopyTo(buffer.Slice(bytesWritten));
+                    bytesWritten += toCopy;
 
-                    if (bytesRead == maxRead)
+                    if (bytesWritten == maxRead)
                     {
                         offset += toCopy;
                         break;
@@ -118,6 +112,25 @@ namespace EnjoySockets
         {
             var tail = GetTail();
             return new ReadOnlySequence<byte>(this, 0, tail, tail._usedBytes);
+        }
+
+        internal EMemorySegment? GetOffset(ref int offset)
+        {
+            var currentSegment = this;
+            int remainingOffset = offset;
+
+            while (currentSegment != null)
+            {
+                if (remainingOffset < currentSegment._usedBytes)
+                {
+                    offset = remainingOffset;
+                    return currentSegment;
+                }
+                remainingOffset -= currentSegment._usedBytes;
+                currentSegment = currentSegment.ENext;
+            }
+            offset = 0;
+            return null;
         }
 
         EMemorySegment GetTail()

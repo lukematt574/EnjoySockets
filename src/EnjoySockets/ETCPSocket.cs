@@ -16,9 +16,15 @@ namespace EnjoySockets
 
     internal sealed class ETCPSocket
     {
-        public const int MaxPayloadBytes = 1250;
-        public const int MaxPacketSizeBytes = 1330;
-        public const int PacketPrefixLength = 2;
+        //length packet from socket
+        public const short PacketPrefixLength = 2;
+        //header aes-gcm (nonce, tag)
+        public const short PacketEncryptHeader = 28;
+        //packet header in plain msg
+        public const short PacketHeader = 29;
+
+        public const int MaxPacketSizeConnect = 1330;
+
         public const int MaxCachedResponses = 50;
         public const int MinBufferSlotSizeBytes = 30;
 
@@ -38,8 +44,8 @@ namespace EnjoySockets
             args.StartPrepare(PacketPrefixLength);
             if (await ReadAsync(socket, args))
             {
-                var dataLength = BinaryPrimitives.ReadInt16LittleEndian(args.GetSaveBytes().Span);
-                if (dataLength <= 0 || dataLength > MaxPacketSizeBytes)
+                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(args.GetSaveBytesSpan());
+                if (dataLength <= 0 || dataLength > MaxPacketSizeConnect)
                     return Memory<byte>.Empty;
 
                 args.StartPrepare(dataLength);
@@ -64,7 +70,7 @@ namespace EnjoySockets
                 var prefix = buffer.Slice(0, PacketPrefixLength);
                 if (await Read(socket, prefix))
                 {
-                    var dataLength = BinaryPrimitives.ReadInt16LittleEndian(prefix.Span);
+                    var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(prefix.Span);
                     if (dataLength > 512 || dataLength < 126)
                         return null;
 
@@ -105,8 +111,8 @@ namespace EnjoySockets
             args.StartPrepare(2);
             if (await ReadAsync(socket, args))
             {
-                var dataLength = BinaryPrimitives.ReadInt16LittleEndian(args.GetSaveBytes().Span);
-                if (dataLength <= 28 || dataLength > MaxPacketSizeBytes)
+                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(args.GetSaveBytesSpan());
+                if (dataLength <= PacketEncryptHeader || dataLength > MaxPacketSizeConnect)
                     return Memory<byte>.Empty;
 
                 args.StartPrepare(dataLength);
@@ -275,7 +281,7 @@ namespace EnjoySockets
 
         internal static ValueTask<bool> Send(Socket socket, ReadOnlyMemory<byte> data)
         {
-            if (data.Length > MaxPacketSizeBytes)
+            if (data.Length > MaxPacketSizeConnect)
                 return ValueTask.FromResult(false);
 
             return Write(socket, data);
@@ -291,14 +297,17 @@ namespace EnjoySockets
 
         internal static ValueTask<bool> Send(Socket? socket, ESendArgs args, EAesGcm aes, ReadOnlyMemory<byte> data)
         {
-            if (socket == null || !args.SetToSend(data, aes))
+            if (socket == null || !args.SetToSend(data.Span, aes))
                 return ValueTask.FromResult(false);
 
             return Write(socket, args);
         }
 
-        internal static ValueTask<bool> Write(Socket socket, ESendArgs args)
+        internal static ValueTask<bool> Write(Socket? socket, ESendArgs args)
         {
+            if (socket == null)
+                return ValueTask.FromResult(false);
+
             int sentSoFar = 0;
             while (sentSoFar < args.MaxLengthArray)
             {

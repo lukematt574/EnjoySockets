@@ -170,17 +170,23 @@ namespace EnjoySockets
                 return -1;
             }
 
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(SocketResource.RunObjMsgSend, t, segments, instance);
-            ulong session;
-            if (vt.IsCompletedSuccessfully)
-                session = vt.Result;
-            else
-                session = await vt;
-
-            if (session < 1)
-                session = SocketResource.GetSession();
-
+            ulong session = SocketResource.GetSession();
             var sender = SocketResource.MsgCache.Get(session, t, instance, segments);
+            if(sender == null)
+            {
+                segments?.Clear();
+                _controlSending.Release(ecsw);
+                return -1;
+            }
+
+            var objMsg = ESendMsg.Rent();
+            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
+            objMsg.Session = session;
+
+            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(objMsg);
+            if (!vt.IsCompletedSuccessfully)
+                await vt;
+
             var resultFromServ = await sender.AsValueTask();
             SocketResource.MsgCache.Remove(session);
             _controlSending.Release(ecsw);
@@ -219,27 +225,42 @@ namespace EnjoySockets
                 return false;
             }
 
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(SocketResource.RunObjMsgSend, t, segments, instance);
-            ulong session;
-            if (vt.IsCompletedSuccessfully)
-                session = vt.Result;
-            else
-                session = await vt;
-
-            if (session < 1)
+            var totalBytes = segments?.WrittenBytes ?? 0;
+            ulong session = SocketResource.GetSession();
+            var sender = SocketResource.MsgCache.Get(session, totalBytes);
+            if (sender == null)
             {
                 segments?.Clear();
                 _controlSending.Release(ecsw);
                 return false;
             }
 
-            _ = SendWaitOnResultFromServ(SocketResource, session, segments?.WrittenBytes ?? 0, ecsw);
+            var objMsg = ESendMsg.Rent();
+            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
+            objMsg.Session = session;
+
+            var success = false;
+            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(objMsg);
+            if (vt.IsCompletedSuccessfully)
+                success = vt.Result > 0;
+            else
+                success = await vt > 0;
+
+            segments?.Clear();
+
+            if (!success)
+            {
+                SocketResource.MsgCache.Remove(session);
+                _controlSending.Release(ecsw);
+                return false;
+            }
+
+            _ = SendWaitOnResultFromServ(SocketResource, session, ecsw, sender);
             return true;
         }
 
-        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, int totalBytes, EControlSendingWaiter ecsw)
+        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, EControlSendingWaiter ecsw, ESender sender)
         {
-            var sender = sr.MsgCache.Get(session, totalBytes);
             await sender.AsValueTask();
             sr.MsgCache.Remove(session);
             _controlSending.Release(ecsw);

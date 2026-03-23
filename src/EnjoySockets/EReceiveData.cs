@@ -1,7 +1,5 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
-using EnjoySockets.DTO;
-
 namespace EnjoySockets
 {
     internal abstract class EReceiveData
@@ -17,6 +15,7 @@ namespace EnjoySockets
         internal object? User { get; private set; }
         internal bool InChannel { get; set; }
         internal long Response { get; set; } = -1;
+        internal bool CorruptedArg { get; set; }
 
         private protected EBufferControl? BufferControl { get; set; }
         private protected int _rentBytes = 0;
@@ -36,24 +35,31 @@ namespace EnjoySockets
             InChannel = false;
         }
 
-        protected void SetBasicData(PartDataDTO part)
+        protected void SetBasicData(ReadOnlySpan<byte> part, long instance)
         {
-            Session = part.Session;
-            TotalBytes = part.TotalBytes;
-            Instance = part.Instance;
+            Session = ESocketResource.ReadSession(part);
+            TotalBytes = ESocketResource.ReadTotalBytes(part);
+            Instance = instance;
         }
 
-        internal virtual int TryPushPart(PartDataDTO part) { return 0; }
+        internal virtual int TryPushPart(ReadOnlySpan<byte> part) { return 0; }
         internal ValueTask<long> Run()
         {
             var cell = Cell!;
             try
             {
                 if (FinalArg == null && !cell.ArgAllowNull)
+                {
+                    CorruptedArg = true;
                     return ValueTask.FromResult(Response = -1);
+                }
 
                 // TODO: Replace reflection with source-generated delegate invocation.
-                var result = cell.MethodInfo.Invoke(InstanceObj, GetArgs());
+                object? result = null;
+                if (cell.Execute != null)
+                    result = cell.Execute.Invoke(InstanceObj!, GetArgs()!);
+                else
+                    result = cell.MethodInfo.Invoke(InstanceObj, GetArgs());
 
                 return result switch
                 {
@@ -65,6 +71,7 @@ namespace EnjoySockets
             }
             catch
             {
+                CorruptedArg = true;
                 return ValueTask.FromResult(Response = -1);
             }
         }
@@ -98,6 +105,7 @@ namespace EnjoySockets
             User = null;
             ESocketResourceObj = null;
             InstanceObj = null;
+            CorruptedArg = false;
         }
     }
 }

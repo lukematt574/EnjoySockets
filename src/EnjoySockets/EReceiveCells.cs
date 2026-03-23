@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -75,7 +76,7 @@ namespace EnjoySockets
 
                     var objVal = obj.Value.First();
                     var classAttr = objVal.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
-                    var cell = GetRCell(objVal.Item1, classAttr, target, objVal.Item2);
+                    var cell = GetRCell(objVal.Item1, classAttr, objVal.Item2);
                     if (!Cells.TryGetValue(target, out _))
                     {
                         Cells.Add(target, cell);
@@ -98,7 +99,7 @@ namespace EnjoySockets
                         continue;
 
                     var classAttr = obj.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
-                    var cell = GetRCell(obj.Item1, classAttr, target, obj.Item2);
+                    var cell = GetRCell(obj.Item1, classAttr, obj.Item2);
                     if (!CellsInstanceId.TryGetValue(obj.Item2, out Dictionary<ulong, ERCell>? dict))
                         CellsInstanceId.Add(obj.Item2, new() { { target, cell } });
                     else
@@ -328,9 +329,9 @@ namespace EnjoySockets
             return false;
         }
 
-        private static EObjPool? GetPool(Type? type, int eId, uint maxObjs)
+        private static EObjPool? GetPool(Type? type, int eId, uint maxObjs, bool allowNull)
         {
-            if (type == null || eId == 0) return null;
+            if (type == null || eId == 0 || allowNull) return null;
 
             if (type == typeof(string))
             {
@@ -365,7 +366,7 @@ namespace EnjoySockets
         /// <summary>
         /// Create RCell object
         /// </summary>
-        static ERCell GetRCell(MethodInfo methodInfo, EAttr? classAttr, ulong target, Type classType)
+        static ERCell GetRCell(MethodInfo methodInfo, EAttr? classAttr, Type classType)
         {
             var mParams = methodInfo.GetParameters();
 
@@ -385,11 +386,11 @@ namespace EnjoySockets
                 allowNull = CheckAllowNullParam(argType, mParams[1]);
             }
 
-            var mAttr = methodInfo.GetCustomAttributes(true).FirstOrDefault(x => x.GetType() == typeof(EAttr)) as EAttr;
+            var mAttr = methodInfo.GetCustomAttributes(true).FirstOrDefault(x => x is EAttr) as EAttr;
             var tempAttr = mAttr?.Clone() ?? DefAttr.Clone();
             tempAttr.Fill(classAttr);
 
-            return new ERCell(target, socketType, tempAttr, methodInfo, argType, allowNull, GetPool(argType, tempAttr.PoolId, 0), classType);
+            return new ERCell(socketType, tempAttr, methodInfo, argType, allowNull, GetPool(argType, tempAttr.PoolId, 0, allowNull), classType);
         }
 
         static bool IsOrSubclassOf(Type type, Type baseType) => type == baseType || type.IsSubclassOf(baseType);

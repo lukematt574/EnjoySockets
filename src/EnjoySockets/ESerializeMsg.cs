@@ -19,7 +19,6 @@ namespace EnjoySockets
             lock (_lock)
             {
                 var _buffer = _bufferPool.Rent();
-                _buffer.ResetWrittenCount();
                 try
                 {
                     if (ESerial.Serialize(_buffer, obj, t) == 0 || _buffer.WrittenCount > _msgBuffer)

@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<RootNamespace>EnjoySockets</RootNamespace>
 		<AssemblyName>EnjoySockets</AssemblyName>
-		<Version>1.1.0</Version>
+		<Version>1.2.1</Version>
 		<PackageId>EnjoySockets</PackageId>
 		<TargetFrameworks>net6.0;net8.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>

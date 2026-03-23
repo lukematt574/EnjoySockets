@@ -24,7 +24,7 @@ namespace EnjoySockets
         public ulong Target { get; private set; }
         public long Instance { get; private set; }
         public int TotalBytes { get; private set; }
-        public ulong Session { get; set; }
+        internal ulong Session { get; set; }
 
         Func<ESendMsg, ValueTask<bool>>? Func;
         EMemorySegment? CurrentSegment;
@@ -56,33 +56,38 @@ namespace EnjoySockets
             ToWrite = TotalBytes = CurrentSegmentBytes.HasValue ? CurrentSegmentBytes.Value.Length : 0;
         }
 
-        internal void FillList(List<byte> list)
+        internal int FillSpan(Span<byte> data)
         {
+            if (ToWrite < 1)
+                return 0;
+
+            int toCopy = Math.Min(data.Length, ToWrite);
             if (CurrentSegment == null)
             {
                 if (CurrentSegmentBytes != null)
                 {
-                    int toCopy = Math.Min(ETCPSocket.MaxPayloadBytes, ToWrite);
-#if NET8_0
-                    list.AddRange(CurrentSegmentBytes.Value.Slice(CurrentSegmentIndex, toCopy).Span);
-#else
-                    var span = CurrentSegmentBytes.Value.Slice(CurrentSegmentIndex, toCopy).Span;
-                    for (int i = 0; i < span.Length; i++)
-                        list.Add(span[i]);
-#endif
+                    CurrentSegmentBytes.Value.Slice(CurrentSegmentIndex, toCopy).Span.CopyTo(data);
                     CurrentSegmentIndex += toCopy;
                 }
             }
             else
-                CurrentSegment = EMemorySegment.FillToList(list, CurrentSegment, ref CurrentSegmentIndex, ETCPSocket.MaxPayloadBytes);
+                CurrentSegment = EMemorySegment.FillSpan(data, CurrentSegment, ref CurrentSegmentIndex, toCopy);
 
-            ToWrite -= list.Count;
+            ToWrite -= toCopy;
+            return toCopy;
         }
 
         internal void SetToWriteAndSession(long offset, ulong session)
         {
-            ToWrite = TotalBytes - (int)offset;
+            int _offset = (int)offset;
+            ToWrite = TotalBytes - _offset;
             ToWrite = ToWrite < 1 ? 0 : ToWrite;
+            if (ToWrite > 0)
+            {
+                CurrentSegmentIndex = _offset;
+                if (CurrentSegment != null)
+                    CurrentSegment = CurrentSegment.GetOffset(ref CurrentSegmentIndex);
+            }
             Session = session;
         }
 

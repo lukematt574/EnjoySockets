@@ -1,9 +1,5 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
-using EnjoySockets.DTO;
-using System.Buffers.Binary;
-using System.Runtime.InteropServices;
-
 namespace EnjoySockets
 {
     public class ESocketResourceClient : ESocketResource
@@ -30,26 +26,28 @@ namespace EnjoySockets
             catch { return false; }
         }
 
-        private protected sealed override ERCell? GetReceiveCell(PartDataDTO dto)
+        private protected sealed override ERCell? GetReceiveCell(ReadOnlySpan<byte> dto)
         {
+            var instance = ReadInstance(dto);
+            var target = ReadTarget(dto);
             ERCell? rCell = null;
-            if (dto.Instance > 0)
+            if (instance > 0)
             {
                 lock (_Lock)
                 {
-                    if (_privateInstances.TryGetValue(dto.Instance, out (object, Dictionary<ulong, ERCell>) val))
-                        rCell = EReceiveCells.GetCellToInstanceId(val.Item1, dto.Target);
+                    if (_privateInstances.TryGetValue(instance, out (object, Dictionary<ulong, ERCell>) val))
+                        rCell = EReceiveCells.GetCellToInstanceId(val.Item1, target);
                 }
             }
             else
-                rCell = EReceiveCells.GetCellToBasic(dto.Target);
+                rCell = EReceiveCells.GetCellToBasic(target);
 
             return rCell;
         }
 
-        private protected sealed override void RunReceiveMsg(ERCell rCell, PartDataDTO dto)
+        private protected sealed override void RunReceiveMsg(ERCell rCell, ReadOnlySpan<byte> dto, ulong session)
         {
-            if (rCell.AttrMethod.MaxParamSize != 0 && dto.TotalBytes > rCell.AttrMethod.MaxParamSize)
+            if (rCell.AttrMethod.MaxParamSize != 0 && ReadTotalBytes(dto) > rCell.AttrMethod.MaxParamSize)
                 return;
 
             var msg = EReceiveMsg.Get(UserObj, this, null, dto, rCell);
@@ -57,7 +55,7 @@ namespace EnjoySockets
             {
                 lock (_Lock)
                 {
-                    if (!ReceiveDataSessions.TryAdd(dto.Session, msg))
+                    if (!ReceiveDataSessions.TryAdd(session, msg))
                     {
                         msg.Dispose();
                         return;
@@ -79,7 +77,7 @@ namespace EnjoySockets
             base.DisposeReceiveDataFromChannel(eData);
         }
 
-        private protected sealed override void RunReceiveMsg(EReceiveData eData, PartDataDTO dto)
+        private protected sealed override void RunReceiveMsg(EReceiveData eData, ReadOnlySpan<byte> dto)
         {
             var result = TryPushReceiveDTO(eData, dto);
             if (result > 1)//over 1 - error
@@ -92,37 +90,30 @@ namespace EnjoySockets
             }
         }
 
-        private protected sealed override bool ReceiveSpecial(PartDataDTO dto)
+        private protected sealed override bool ReceiveSpecial(ReadOnlySpan<byte> dto)
         {
-            switch (dto.Target)
+            switch (ReadTarget(dto))
             {
                 case 0: break;
-                case 1: MsgCache.SetEndMsg(dto.Session, GetMsgFromDTO(dto)); break;//method executed. The result is stored in msg. Possible error: -1 = method execution failed.
+                case 1: MsgCache.SetEndMsg(ReadSession(dto), ReadMsgFromPayload(dto)); break;//method executed. The result is stored in msg. Possible error: -1 = method execution failed.
                 case 2:
-                    var msg = GetMsgFromDTO(dto);
-                    MsgCache.SetEndMsg(dto.Session, msg == 2 ? -2 : -5);
+                    var msg = ReadMsgFromPayload(dto);
+                    MsgCache.SetEndMsg(ReadSession(dto), msg == 2 ? -2 : -5);
                     break;
-                case 3: MsgCache.SetEndMsg(dto.Session, -3); break;//response could not be retrieved (session expired)
-                case 4: MsgCache.SetEndMsg(dto.Session, -2); break;//buffer full
-                case 5: MsgCache.SetEndMsg(dto.Session, -4); break;//access denied
-                case 6: MsgCache.SetEndMsg(dto.Session, -5); break;//invalid payload
+                case 3: MsgCache.SetEndMsg(ReadSession(dto), -3); break;//response could not be retrieved (session expired)
+                case 4: MsgCache.SetEndMsg(ReadSession(dto), -2); break;//buffer full
+                case 5: MsgCache.SetEndMsg(ReadSession(dto), -4); break;//access denied
+                case 6: MsgCache.SetEndMsg(ReadSession(dto), -5); break;//invalid payload
                 case 7: SetBrokeMsgToSend(dto); break;//resend remaining bytes starting from the position specified in msg (if use 'SendWithResponse' method)
             }
             return true;
         }
 
-        long? GetMsgFromDTO(PartDataDTO dto)
+        void SetBrokeMsgToSend(ReadOnlySpan<byte> dto)
         {
-            if (dto.Data.Count == 8)
-                return BinaryPrimitives.ReadInt64LittleEndian(CollectionsMarshal.AsSpan(dto.Data));
-
-            return null;
-        }
-
-        void SetBrokeMsgToSend(PartDataDTO dto)
-        {
-            var offset = GetMsgFromDTO(dto);
-            var sender = MsgCache.SetBrokeMsgToSend(dto.Session, offset);
+            var offset = ReadMsgFromPayload(dto);
+            var session = ReadSession(dto);
+            var sender = MsgCache.SetBrokeMsgToSend(session, offset);
             if (sender != null)
             {
                 var obj = ESendMsg.Rent();
@@ -131,10 +122,10 @@ namespace EnjoySockets
                 else
                     obj.RunPrepare(RunObjMsgSend, sender.Target, sender.Msg, sender.Instance);
                 obj.SetToWriteAndSession((long)offset!, sender.Session);
-                _ = ChannelSend.TrySendMsgAndGetSession(obj);
+                ChannelSend.TrySendMsgAndGetSession(obj);
             }
             else
-                MsgCache.SetEndMsg(dto.Session, -3);
+                MsgCache.SetEndMsg(session, -3);
         }
 
         internal async ValueTask<bool> RebuildSessions()
@@ -156,6 +147,11 @@ namespace EnjoySockets
             }
             else
                 return false;
+        }
+
+        internal override ulong GetSession()
+        {
+            return Interlocked.Increment(ref LastSessionToGet);
         }
 
         internal override sealed void Dispose()

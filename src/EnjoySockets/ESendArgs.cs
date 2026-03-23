@@ -11,12 +11,15 @@ namespace EnjoySockets
         public SocketAsyncEventArgs SAEA { get; private set; }
         public int MaxLengthArray { get; private set; } = 0;
 
-        readonly byte[] _array = new byte[ETCPSocket.MaxPacketSizeBytes];
+        readonly byte[] _array;
         ManualResetValueTaskSourceCore<int> _mrvtsc;
         int _offsetMemory = 0;
 
-        public ESendArgs()
+        const short _fullPacketHeaderEncrypt = ETCPSocket.PacketEncryptHeader + ETCPSocket.PacketPrefixLength;
+
+        public ESendArgs(ushort maxFullEncryptPacket)
         {
+            _array = new byte[maxFullEncryptPacket];
             SAEA = new SocketAsyncEventArgs();
             SAEA.Completed += SendCompleted;
             _mrvtsc = new ManualResetValueTaskSourceCore<int> { RunContinuationsAsynchronously = true };
@@ -34,27 +37,33 @@ namespace EnjoySockets
         {
             MaxLengthArray = ETCPSocket.PacketPrefixLength + dataToWrite.Length;
             _offsetMemory = 0;
-            if (ETCPSocket.MaxPacketSizeBytes - MaxLengthArray < 0)
+            if (_array.Length < MaxLengthArray)
             {
                 MaxLengthArray = 0;
                 return false;
             }
-            BinaryPrimitives.WriteInt16LittleEndian(_array.AsSpan(0, ETCPSocket.PacketPrefixLength), (short)dataToWrite.Length);
+            BinaryPrimitives.WriteUInt16LittleEndian(_array.AsSpan(0, ETCPSocket.PacketPrefixLength), (ushort)dataToWrite.Length);
             dataToWrite.CopyTo(_array.AsMemory(ETCPSocket.PacketPrefixLength, dataToWrite.Length));
             return true;
         }
 
-        public bool SetToSend(ReadOnlyMemory<byte> dataToWrite, EAesGcm aes)
+        public bool SetToSend(ReadOnlySpan<byte> dataToWrite, EAesGcm aes)
         {
-            MaxLengthArray = 30 + dataToWrite.Length;
+            MaxLengthArray = _fullPacketHeaderEncrypt + dataToWrite.Length;
             _offsetMemory = 0;
-            if (ETCPSocket.MaxPacketSizeBytes - MaxLengthArray < 0)
+            if (_array.Length < MaxLengthArray)
             {
                 MaxLengthArray = 0;
                 return false;
             }
-            BinaryPrimitives.WriteInt16LittleEndian(_array.AsSpan(0, ETCPSocket.PacketPrefixLength), (short)(dataToWrite.Length + 28));
-            if (!aes.Encrypt(_array.AsSpan(ETCPSocket.PacketPrefixLength, 12), dataToWrite.Span, _array.AsSpan(30, dataToWrite.Length), _array.AsSpan(14, 16)))
+
+            Span<byte> arraySpan = _array;
+            BinaryPrimitives.WriteUInt16LittleEndian(arraySpan.Slice(0, ETCPSocket.PacketPrefixLength), (ushort)(dataToWrite.Length + ETCPSocket.PacketEncryptHeader));
+
+            Span<byte> nonce = arraySpan.Slice(ETCPSocket.PacketPrefixLength, 12);
+            Span<byte> tag = arraySpan.Slice(14, 16);
+            Span<byte> encryptedData = arraySpan.Slice(_fullPacketHeaderEncrypt, dataToWrite.Length);
+            if (!aes.Encrypt(nonce, dataToWrite, encryptedData, tag))
             {
                 MaxLengthArray = 0;
                 return false;

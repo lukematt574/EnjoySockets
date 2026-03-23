@@ -2,31 +2,29 @@
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using System.Buffers;
 using System.Reflection;
+using System.Reflection.Emit;
 
 namespace EnjoySockets
 {
-    public enum EDataForm
+    public enum EDataForm : byte
     {
-        Msg, Special
+        Msg = 0,
+        Special = 1
     }
 
     internal sealed class ERCell
     {
-        public string Target { get; private set; }
-        public ulong IdTarget { get; private set; }
         public ETCPSocketType SocketType { get; private set; }
         public EAttr AttrMethod { get; private set; }
         public Type ClassType { get; private set; }
         public MethodInfo MethodInfo { get; private set; }
         public Type? ArgType { get; private set; }
-        public Type? ArgReturn { get; private set; }
         public bool ArgAllowNull { get; private set; }
         public EObjPool? ArgObjectsPool { get; private set; }
+        public Func<object, object[], object>? Execute { get; private set; }
 
-        internal ERCell(ulong idTarget, ETCPSocketType socketType, EAttr eReceive, MethodInfo mInfo, Type? argType, bool argAllowNull, EObjPool? pool, Type classType)
+        internal ERCell(ETCPSocketType socketType, EAttr eReceive, MethodInfo mInfo, Type? argType, bool argAllowNull, EObjPool? pool, Type classType)
         {
-            Target = mInfo.Name;
-            IdTarget = idTarget;
             SocketType = socketType;
             AttrMethod = eReceive;
             ArgType = argType;
@@ -34,12 +32,75 @@ namespace EnjoySockets
             ClassType = classType;
             ArgAllowNull = argAllowNull;
             ArgObjectsPool = pool;
-            ArgReturn = MethodInfo.ReturnType;
+            if (ETCPServer.IsJIT)
+                Execute = CreateInvoker(MethodInfo);
         }
 
-        internal bool Deserialize(Span<byte> bytesData, ref object? obj)
+        Func<object, object[], object>? CreateInvoker(MethodInfo method)
         {
-            if (ArgType == null) return true;
+            try
+            {
+                var dm = new DynamicMethod(
+                    "Invoker",
+                    typeof(object),
+                    [typeof(object), typeof(object[])],
+                    true
+                );
+
+                var il = dm.GetILGenerator();
+
+                var parameters = method.GetParameters();
+
+                if (!method.IsStatic)
+                {
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Castclass, method.DeclaringType!);
+                }
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    il.Emit(OpCodes.Ldarg_1);
+                    il.Emit(OpCodes.Ldc_I4, i);
+                    il.Emit(OpCodes.Ldelem_Ref);
+
+                    var paramType = parameters[i].ParameterType;
+
+                    if (paramType.IsValueType)
+                        il.Emit(OpCodes.Unbox_Any, paramType);
+                    else
+                        il.Emit(OpCodes.Castclass, paramType);
+                }
+
+                if (method.IsVirtual)
+                    il.Emit(OpCodes.Callvirt, method);
+                else
+                    il.Emit(OpCodes.Call, method);
+
+                if (method.ReturnType == typeof(void))
+                {
+                    il.Emit(OpCodes.Ldnull);
+                }
+                else if (method.ReturnType.IsValueType)
+                {
+                    il.Emit(OpCodes.Box, method.ReturnType);
+                }
+
+                il.Emit(OpCodes.Ret);
+
+                return (Func<object, object[], object>)dm.CreateDelegate(typeof(Func<object, object[], object>));
+            }
+            catch
+            {
+                ETCPServer.IsJIT = false;
+                return null;
+            }
+        }
+
+        internal bool Deserialize(ReadOnlySpan<byte> bytesData, ref object? obj)
+        {
+            if (ArgType == null) 
+                return true;
+
             if (ArgObjectsPool != null)
             {
                 obj = ArgObjectsPool.Rent();
@@ -62,7 +123,9 @@ namespace EnjoySockets
 
         internal object? Deserialize(ReadOnlySequence<byte> bytesData)
         {
-            if (ArgType == null) return null;
+            if (ArgType == null) 
+                return null;
+
             if (ArgObjectsPool != null)
             {
                 var obj = ArgObjectsPool.Rent();

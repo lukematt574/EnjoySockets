@@ -11,6 +11,14 @@ namespace EnjoySockets
         public ushort MessageBuffer { get; set; } = 300;
 
         /// <summary>
+        /// Max packet size for socket.send in bytes. 
+        /// Minimum: 1200 bytes. Default: 1300 bytes.
+        /// 
+        /// IMPORTANT: This value must be identical on both client and server.
+        /// </summary>
+        public short MaxPacketSize { get; set; } = 1300;
+
+        /// <summary>
         /// Time in milliseconds to wait for a packet acknowledgment (connect).
         /// If no acknowledgment is received within this time, the connection is dropped.
         /// Default: 2000 ms.
@@ -61,6 +69,7 @@ namespace EnjoySockets
             return new ETCPClientConfig
             {
                 MessageBuffer = MessageBuffer < 2 ? (ushort)2 : MessageBuffer,
+                MaxPacketSize = MaxPacketSize < 1200 ? (short)1300 : MaxPacketSize,
                 ResponseTimeout = ResponseTimeout < 100 || ResponseTimeout > 8000 ? 2500 : ResponseTimeout,
                 ConnectTimeout = ConnectTimeout < 1 || ConnectTimeout > 30 ? 3 : ConnectTimeout,
                 Heartbeat = Heartbeat < 0 || Heartbeat > 3600 ? 0 : Heartbeat,
@@ -96,6 +105,7 @@ namespace EnjoySockets
                 QueueSocketToAccept = QueueSocketToAccept < 1 || QueueSocketToAccept > 4096 ? 128 : QueueSocketToAccept,
                 MaxSockets = MaxSockets,
                 MessageBuffer = MessageBuffer < 2 ? (ushort)2 : MessageBuffer,
+                MaxPacketSize = MaxPacketSize < 1200 ? (short)1300 : MaxPacketSize,
                 KeepAlive = KeepAlive < 10 || KeepAlive > 43200 ? 60 : KeepAlive,
                 ResponseTimeout = ResponseTimeout < 100 || ResponseTimeout > 8000 ? 1500 : ResponseTimeout,
                 Heartbeat = Heartbeat < 1 || Heartbeat > 3600 ? 30 : Heartbeat,
