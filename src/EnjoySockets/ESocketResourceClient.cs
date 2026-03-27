@@ -1,5 +1,8 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using EnjoySockets.DTO;
+using System.Runtime.InteropServices;
+
 namespace EnjoySockets
 {
     public class ESocketResourceClient : ESocketResource
@@ -15,6 +18,28 @@ namespace EnjoySockets
             MsgCache = new();
             if (Heartbeat > 0)
                 _ = StartHeartbeat();
+        }
+
+        private protected sealed override void SetPublicKey(ReadOnlyMemory<byte> publicKey)
+        {
+            int offset = ERSA.HandshakeHeader.Length;
+            var publicKeyMemory = ToSignature.AsMemory(offset, publicKey.Length);
+            publicKey.CopyTo(publicKeyMemory);
+            PublicKey = publicKeyMemory;
+            _offsetServerPublicKey = ERSA.HandshakeHeader.Length + publicKey.Length;
+            _publicKeyLength = publicKeyMemory.Length;
+        }
+
+        int _publicKeyLength;
+        int _offsetServerPublicKey;
+        internal ReadOnlyMemory<byte> BuildSignature(ConnectResponseDTO dto, byte[] token)
+        {
+            if (dto.PublicKey.Length != _publicKeyLength)
+                return ReadOnlyMemory<byte>.Empty;
+
+            dto.PublicKey.CopyTo(ToSignature.AsMemory(_offsetServerPublicKey, _publicKeyLength));
+            token.CopyTo(ToSignature, ToSignature.Length - token.Length);
+            return ToSignature.AsMemory();
         }
 
         internal bool SetSalt()

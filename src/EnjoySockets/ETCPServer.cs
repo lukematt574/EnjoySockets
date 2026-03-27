@@ -427,35 +427,40 @@ namespace EnjoySockets
             if (ServerIsAvailable())
             {
                 var esr = RentESR(Config, _rsaKey);
+                
                 if (esr.SetAesGcmKey(CollectionsMarshal.AsSpan(connectDTO.Key), CollectionsMarshal.AsSpan(connectDTO.NewTokenToReconnect)))
                 {
-                    esr.AppendSocket(socket);
-                    if (await esr.SendPlainBytesObj(new ConnectResponseDTO() { Control = AuthorizationObj != null ? (byte)2 : (byte)5, PublicKey = esr.PublicKey, Sign = esr.PublicKeySign }))
+                    var signature = esr.BuildSignature(connectDTO);
+                    if (signature.Length > 0)
                     {
-                        if (AuthorizationObj != null)
+                        esr.AppendSocket(socket);
+                        if (await esr.SendPlainBytesObj(new ConnectResponseDTO() { Control = AuthorizationObj != null ? (byte)2 : (byte)5, PublicKey = esr.PublicKey, Sign = signature }))
                         {
-                            var msgBytes = await esr.ReceiveEncryptWithTimeout();
-                            if (msgBytes.Length > 1)
+                            if (AuthorizationObj != null)
+                            {
+                                var msgBytes = await esr.ReceiveEncryptWithTimeout();
+                                if (msgBytes.Length > 1)
+                                {
+                                    var client = CreateUser(esr);
+                                    client.ReleaseEvent = ReleaseUser;
+                                    client.AuthorizationMethod = _authorizationMethod;
+                                    var objAuth = ESerial.Deserialize(msgBytes.Span, AuthorizationObj);
+                                    var resAuth = await client.CheckAuthorization(objAuth);
+                                    await esr.SendBytes(resAuth);
+                                    if (resAuth == 0)
+                                    {
+                                        StartUser(connectDTO.UserId, client);
+                                        return;
+                                    }
+                                }
+                            }
+                            else
                             {
                                 var client = CreateUser(esr);
                                 client.ReleaseEvent = ReleaseUser;
-                                client.AuthorizationMethod = _authorizationMethod;
-                                var objAuth = ESerial.Deserialize(msgBytes.Span, AuthorizationObj);
-                                var resAuth = await client.CheckAuthorization(objAuth);
-                                await esr.SendBytes(resAuth);
-                                if (resAuth == 0)
-                                {
-                                    StartUser(connectDTO.UserId, client);
-                                    return;
-                                }
+                                StartUser(connectDTO.UserId, client);
+                                return;
                             }
-                        }
-                        else
-                        {
-                            var client = CreateUser(esr);
-                            client.ReleaseEvent = ReleaseUser;
-                            StartUser(connectDTO.UserId, client);
-                            return;
                         }
                     }
                 }

@@ -379,6 +379,7 @@ namespace EnjoySockets
         readonly byte[] BufferConDTO = new byte[512];
         readonly ConnectDTO ConnectDTOObj = new();
         bool _connecting = false;
+        bool _firstConnect = true;
         /// <summary>
         /// Asynchronously connects to the server endpoint and performs handshake.
         /// </summary>
@@ -450,7 +451,7 @@ namespace EnjoySockets
                         if (connectDTO.Control == 1 || connectDTO.Control == 4)
                         {
                             //old key
-                            if (!SocketResource.SetSalt())
+                            if (_firstConnect || !SocketResource.SetSalt())
                                 return Close(5);
 
                             if (connectDTO.Control == 1)
@@ -463,11 +464,16 @@ namespace EnjoySockets
                         }
                         else if (connectDTO.Control == 2 || connectDTO.Control == 5)
                         {
+                            var signature = SocketResource.BuildSignature(connectDTO, SocketResource.NewTokenToReconnect);
+                            if (signature.Length < 1)
+                                return Close(5);
+
                             //new key
-                            if (await SocketResource.Ersa.VerifyDataRsa(connectDTO.PublicKey, connectDTO.Sign))
+                            if (await SocketResource.Ersa.VerifyDataRsa(signature, connectDTO.Sign))
                             {
                                 if (SocketResource.SetAesGcmKey(connectDTO.PublicKey.Span, SocketResource.NewTokenToReconnect))
                                 {
+                                    _firstConnect = false;
                                     if (connectDTO.Control == 2)
                                         return await SendAuth();
                                     else

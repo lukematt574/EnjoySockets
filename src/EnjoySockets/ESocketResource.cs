@@ -22,15 +22,12 @@ namespace EnjoySockets
         internal object? UserObj { get; set; }
 
         internal byte[] TokenToReconnect = new byte[32];
-        //private protected PartDataDTO PreparedSendObj = new() { Data = new(ETCPSocket.MaxPayloadBytes) };
         private protected EArrayBufferPool _eArrayBufferPool = EArrayBufferPool.GetPool(ETCPSocket.MaxPacketSizeConnect);
-        //private protected EArrayBufferWriter ArrayBufferWriterSend = new();
         private protected ESerializeMsg ESerializeMsgObj;
 
         private protected EAesGcm AESgcm { get; private set; }
 
         private protected ulong LastSessionReceive;
-        //private protected PartDataDTO? ReceivePartObj = new() { Data = new(ETCPSocket.MaxPayloadBytes + 50) };
         private protected Dictionary<ulong, EReceiveMsg> ReceiveDataSessions = [];
 
         internal ESendChannel ChannelSend { get; private set; }
@@ -42,11 +39,12 @@ namespace EnjoySockets
         byte[] _sendBuffer;
 
         private protected ECDiffieHellman ECDH { get; private set; }
-        internal ReadOnlyMemory<byte> PublicKey { get; private set; }
+        internal ReadOnlyMemory<byte> PublicKey { get; set; }
         internal ERSA Ersa { get; private set; }
 
         readonly ECDiffieHellman _outPublicKey;
         readonly byte[] AESKey = new byte[32];
+        private protected readonly byte[] ToSignature;
 
         internal ETCPConfig Config { get; private set; }
         internal int Heartbeat { get; private set; }
@@ -74,11 +72,15 @@ namespace EnjoySockets
             ECDH = ECDiffieHellman.Create(Config.Curve);
             var pk = new byte[158];
             var pkLength = EAesGcm.ExportSpki(ECDH, pk);
-            PublicKey = pk.AsMemory(0, pkLength);
+            ToSignature = new byte[ERSA.HandshakeHeader.Length + (pkLength * 2) + TokenToReconnect.Length];
+            ERSA.HandshakeHeader.CopyTo(ToSignature);
+            SetPublicKey(pk.AsMemory(0, pkLength));
 
             ChannelSend = new(this);
             ChannelReceiveBasic = new();
         }
+
+        private protected virtual void SetPublicKey(ReadOnlyMemory<byte> publicKey) { }
 
         internal bool AppendSocket(Socket socket)
         {

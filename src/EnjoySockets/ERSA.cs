@@ -21,6 +21,17 @@ namespace EnjoySockets
     /// </summary>
     public class ERSA
     {
+        public static ReadOnlyMemory<byte> HandshakeHeader { get; private set; }
+        static byte[] _handshakeHeader { get; set; }
+
+        static ERSA()
+        {
+            var name = Encoding.ASCII.GetBytes("EnjoySocketsProtocol v1 CertificateVerify");
+            _handshakeHeader = new byte[name.Length + 1];
+            name.CopyTo(_handshakeHeader, 0);
+            HandshakeHeader = new ReadOnlyMemory<byte>(_handshakeHeader);
+        }
+
         RSA? ProviderToEncrypt, ProviderToSign;
 
         /// <summary>

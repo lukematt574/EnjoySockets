@@ -1,11 +1,14 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using EnjoySockets.DTO;
+using System.Runtime.InteropServices;
+
 namespace EnjoySockets
 {
     public class ESocketResourceServer : ESocketResource
     {
         private protected EBufferControl BufferToReceiveMsg;
-        internal ReadOnlyMemory<byte> PublicKeySign { get; private set; }
+        //internal ReadOnlyMemory<byte> PublicKeySign { get; private set; }
 
         internal ETCPServerConfig ConfigServer { get; private set; }
 
@@ -18,13 +21,36 @@ namespace EnjoySockets
 
         internal ESocketResourceServer(ETCPServerConfig config, ERSA ersa) : base(ETCPSocketType.Server, config, ersa)
         {
-            var sig = new byte[512];
-            int countSig = Ersa.SignDataRsa(PublicKey, sig).Result;
-            PublicKeySign = sig.AsMemory(0, countSig);
             ConfigServer = config.Clone();
             KeepAlive = ConfigServer.KeepAlive * 1000;
             BufferToReceiveMsg = new(MessageBuffer);
             _ = StartHeartbeat();
+        }
+
+        private protected sealed override void SetPublicKey(ReadOnlyMemory<byte> publicKey)
+        {
+            int offset = ERSA.HandshakeHeader.Length + publicKey.Length;
+            var publicKeyMemory = ToSignature.AsMemory(offset, publicKey.Length);
+            publicKey.CopyTo(publicKeyMemory);
+            PublicKey = publicKeyMemory;
+            _offsetClientPublicKey = ERSA.HandshakeHeader.Length;
+            _publicKeyLength = publicKeyMemory.Length;
+        }
+
+        int _publicKeyLength;
+        int _offsetClientPublicKey;
+        byte[] _bufferSignature = new byte[512];
+        internal ReadOnlyMemory<byte> BuildSignature(ConnectDTO dto)
+        {
+            if (dto.Key.Count != _publicKeyLength)
+                return ReadOnlyMemory<byte>.Empty;
+
+            var spanClientKey = CollectionsMarshal.AsSpan(dto.Key);
+            spanClientKey.CopyTo(ToSignature.AsSpan(_offsetClientPublicKey, _publicKeyLength));
+            TokenToReconnect.CopyTo(ToSignature, ToSignature.Length - TokenToReconnect.Length);
+
+            int countSig = Ersa.SignDataRsa(ToSignature.AsMemory(), _bufferSignature).Result;
+            return _bufferSignature.AsMemory(0, countSig);
         }
 
         internal bool TryReconnectToken(ReadOnlySpan<byte> token, ReadOnlySpan<byte> salt)
