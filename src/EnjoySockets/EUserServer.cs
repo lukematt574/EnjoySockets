@@ -1,5 +1,6 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+using System;
 using System.Net.Sockets;
 using System.Reflection;
 
@@ -120,19 +121,63 @@ namespace EnjoySockets
                 _ = StartKeepAliveRun();
         }
 
+        /// <summary>
+        /// Sends a message with a payload to the specified target and specified instance.
+        /// </summary>
+        /// <remarks>
+        /// The message is considered sent once it is successfully handed off to the operating system.
+        /// <para>
+        /// This does not guarantee delivery to the receiving client.
+        /// </para>
+        /// </remarks>
+        /// <typeparam name="T">The type of the payload being sent.</typeparam>
+        /// <param name="instance">The destination to which instance the message is sent.</param>
+        /// <param name="target">The destination to which the message is sent.</param>
+        /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
+        /// <returns>
+        /// <see langword="true"/> if the message was successfully passed to the operating system;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
         public override sealed ValueTask<bool> Send<T>(long instance, string target, T? obj) where T : default
         {
             if (Status != ESocketServerStatus.Alive)
-                return new ValueTask<bool>(false);
+                return ValueTask.FromResult(false);
 
-            return base.Send(instance, target, obj);
+            var socketResource = SocketResource;
+            if (socketResource == null)
+                return ValueTask.FromResult(false);
+
+            var t = EReceiveCells.GetUlongToSend(target);
+            if (t < 1)
+                return ValueTask.FromResult(false);
+
+            var segments = socketResource.ObjToSegments(obj);
+            if (segments == null && obj != null)
+                return ValueTask.FromResult(false);
+
+            var rentBytesToBuffer = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
+            rentBytesToBuffer = rentBytesToBuffer < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : rentBytesToBuffer;
+            if (!BufferToSendMsg.TryRent(rentBytesToBuffer))
+            {
+                segments?.Clear();
+                return ValueTask.FromResult(false);
+            }
+
+            var vt = socketResource.ChannelSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
+            if (vt.IsCompletedSuccessfully)
+            {
+                var session = vt.Result;
+                segments?.Clear();
+                BufferToSendMsg.Return(rentBytesToBuffer);
+                return ValueTask.FromResult(session != 0);
+            }
+            return AwaitSendObjAsync(vt, rentBytesToBuffer, segments);
         }
 
         /// <summary>
         /// Sends a serialized message to the specified target and instance.
         /// </summary>
         /// <remarks>
-        /// The message is considered sent once it is successfully handed off to the operating system.
         /// <para>
         /// This does not guarantee delivery to the receiving client.
         /// </para>
@@ -144,38 +189,45 @@ namespace EnjoySockets
         /// <param name="obj">The payload as a serialized byte array. May be empty.</param>
         /// <param name="instance">The target instance ID. Defaults to <c>0</c>.</param>
         /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
+        /// <see langword="true"/> if the message was successfully passed to app buffer;
         /// otherwise, <see langword="false"/>.
         /// </returns>
-        public ValueTask<bool> Send(string target, ReadOnlyMemory<byte> obj, long instance = 0)
+        public bool SendSerialized(string target, ReadOnlySpan<byte> obj, long instance = 0)
         {
             if (Status != ESocketServerStatus.Alive)
-                return ValueTask.FromResult(false);
+                return false;
+
+            var socketResource = SocketResource;
+            if (socketResource == null)
+                return false;
 
             var t = EReceiveCells.GetUlongToSend(target);
             if (t < 1)
-                return ValueTask.FromResult(false);
+                return false;
 
-            var rentBytesToBuffer = obj.Length < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : obj.Length;
+            var rentBytesToBuffer = Math.Max(obj.Length, ETCPSocket.MinBufferSlotSizeBytes);
             if (!BufferToSendMsg.TryRent(rentBytesToBuffer))
-                return ValueTask.FromResult(false);
+                return false;
 
-            if (SocketResource == null)
+            EMemorySegment? segments = null;
+            if (!obj.IsEmpty)
             {
-                BufferToSendMsg.Return(rentBytesToBuffer);
-                return ValueTask.FromResult(false);
+                segments = EMemorySegment.GetFirstSegment();
+                segments.Append(obj);
             }
 
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(SocketResource.RunObjMsgSend, t, obj, instance);
+            var vt = socketResource.ChannelSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
             if (vt.IsCompletedSuccessfully)
             {
+                segments?.Clear();
                 BufferToSendMsg.Return(rentBytesToBuffer);
-                return ValueTask.FromResult(vt.Result != 0);
+                return vt.Result != 0;
             }
-            return AwaitSendMemAsync(vt, rentBytesToBuffer);
+            _ = AwaitSendObjAsync(vt, rentBytesToBuffer, segments);
+            return true;
         }
 
-        async ValueTask<bool> AwaitSendMemAsync(ValueTask<ulong> vt, int buffer)
+        async ValueTask<bool> AwaitSendObjAsync(ValueTask<ulong> vt, int buffer, EMemorySegment? segments)
         {
             try
             {
@@ -183,6 +235,7 @@ namespace EnjoySockets
             }
             finally
             {
+                segments?.Clear();
                 BufferToSendMsg.Return(buffer);
             }
         }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) Luke Matt. All rights reserved.
+// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using EnjoySockets.DTO;
 using System.Collections.Concurrent;
@@ -427,10 +427,10 @@ namespace EnjoySockets
             if (ServerIsAvailable())
             {
                 var esr = RentESR(Config, _rsaKey);
-                
+
                 if (esr.SetAesGcmKey(CollectionsMarshal.AsSpan(connectDTO.Key), CollectionsMarshal.AsSpan(connectDTO.NewTokenToReconnect)))
                 {
-                    var signature = esr.BuildSignature(connectDTO);
+                    var signature = await esr.BuildSignature(connectDTO);
                     if (signature.Length > 0)
                     {
                         esr.AppendSocket(socket);

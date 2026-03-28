@@ -98,7 +98,7 @@ namespace EnjoySockets
 
         internal bool Deserialize(ReadOnlySpan<byte> bytesData, ref object? obj)
         {
-            if (ArgType == null) 
+            if (ArgType == null)
                 return true;
 
             if (ArgObjectsPool != null)
@@ -123,7 +123,7 @@ namespace EnjoySockets
 
         internal object? Deserialize(ReadOnlySequence<byte> bytesData)
         {
-            if (ArgType == null) 
+            if (ArgType == null)
                 return null;
 
             if (ArgObjectsPool != null)

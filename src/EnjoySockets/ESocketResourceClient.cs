@@ -1,7 +1,6 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using EnjoySockets.DTO;
-using System.Runtime.InteropServices;
 
 namespace EnjoySockets
 {
@@ -142,10 +141,7 @@ namespace EnjoySockets
             if (sender != null)
             {
                 var obj = ESendMsg.Rent();
-                if (sender.Msg == null)
-                    obj.RunPrepare(RunObjMsgSend, sender.Target, sender.MsgBytes, sender.Instance);
-                else
-                    obj.RunPrepare(RunObjMsgSend, sender.Target, sender.Msg, sender.Instance);
+                obj.RunPrepare(RunObjMsgSend, sender.Target, sender.Msg, sender.Instance);
                 obj.SetToWriteAndSession((long)offset!, sender.Session);
                 ChannelSend.TrySendMsgAndGetSession(obj);
             }

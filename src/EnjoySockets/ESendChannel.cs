@@ -20,13 +20,6 @@ namespace EnjoySockets
             return TrySendMsgRun(obj);
         }
 
-        internal ValueTask<ulong> TrySendMsgAndGetSession(Func<ESendMsg, ValueTask<bool>> _task, ulong target, ReadOnlyMemory<byte>? segments, long instance)
-        {
-            var obj = ESendMsg.Rent();
-            obj.RunPrepare(_task, target, segments, instance);
-            return TrySendMsgRun(obj);
-        }
-
         internal ValueTask<ulong> TrySendMsgAndGetSession(ESendMsg msg)
         {
             return TrySendMsgRun(msg);

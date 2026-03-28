@@ -1,4 +1,4 @@
-﻿// Copyright (c) Luke Matt. All rights reserved.
+// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using EnjoySockets.DTO;
 using System.Runtime.InteropServices;
@@ -8,7 +8,6 @@ namespace EnjoySockets
     public class ESocketResourceServer : ESocketResource
     {
         private protected EBufferControl BufferToReceiveMsg;
-        //internal ReadOnlyMemory<byte> PublicKeySign { get; private set; }
 
         internal ETCPServerConfig ConfigServer { get; private set; }
 
@@ -40,17 +39,40 @@ namespace EnjoySockets
         int _publicKeyLength;
         int _offsetClientPublicKey;
         byte[] _bufferSignature = new byte[512];
-        internal ReadOnlyMemory<byte> BuildSignature(ConnectDTO dto)
+        internal ValueTask<ReadOnlyMemory<byte>> BuildSignature(ConnectDTO dto)
         {
             if (dto.Key.Count != _publicKeyLength)
-                return ReadOnlyMemory<byte>.Empty;
+                return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
 
             var spanClientKey = CollectionsMarshal.AsSpan(dto.Key);
             spanClientKey.CopyTo(ToSignature.AsSpan(_offsetClientPublicKey, _publicKeyLength));
             TokenToReconnect.CopyTo(ToSignature, ToSignature.Length - TokenToReconnect.Length);
 
-            int countSig = Ersa.SignDataRsa(ToSignature.AsMemory(), _bufferSignature).Result;
-            return _bufferSignature.AsMemory(0, countSig);
+            var signTask = Ersa.SignDataRsa(ToSignature.AsMemory(), _bufferSignature);
+            if (signTask.IsCompletedSuccessfully)
+            {
+                int count = signTask.Result;
+                return count < 1
+                    ? ValueTask.FromResult(ReadOnlyMemory<byte>.Empty)
+                    : ValueTask.FromResult(new ReadOnlyMemory<byte>(_bufferSignature, 0, count));
+            }
+
+            return AwaitSignatureBytes(signTask);
+        }
+
+        async ValueTask<ReadOnlyMemory<byte>> AwaitSignatureBytes(Task<int> signTask)
+        {
+            int count;
+            try
+            {
+                count = await signTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                return ReadOnlyMemory<byte>.Empty;
+            }
+
+            return count < 1 ? ReadOnlyMemory<byte>.Empty : new ReadOnlyMemory<byte>(_bufferSignature, 0, count);
         }
 
         internal bool TryReconnectToken(ReadOnlySpan<byte> token, ReadOnlySpan<byte> salt)

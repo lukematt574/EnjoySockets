@@ -147,72 +147,9 @@ namespace EnjoySockets
             return Send<object>(instance, target, null);
         }
 
-        /// <summary>
-        /// Sends a message with a payload to the specified target and specified instance.
-        /// </summary>
-        /// <remarks>
-        /// The message is considered sent once it is successfully handed off to the operating system.
-        /// <para>
-        /// This does not guarantee delivery to the receiving client.
-        /// </para>
-        /// </remarks>
-        /// <typeparam name="T">The type of the payload being sent.</typeparam>
-        /// <param name="instance">The destination to which instance the message is sent.</param>
-        /// <param name="target">The destination to which the message is sent.</param>
-        /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
-        /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
-        /// otherwise, <see langword="false"/>.
-        /// </returns>
-        public virtual ValueTask<bool> Send<T>(long instance, string target, T? obj)
-        {
-            var t = EReceiveCells.GetUlongToSend(target);
-            if (t < 1)
-                return ValueTask.FromResult(false);
-
-            var segments = SocketResource?.ObjToSegments(obj);
-            if (segments == null && obj != null)
-                return ValueTask.FromResult(false);
-
-            var rentBytesToBuffer = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
-            rentBytesToBuffer = rentBytesToBuffer < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : rentBytesToBuffer;
-            if (!BufferToSendMsg.TryRent(rentBytesToBuffer))
-            {
-                segments?.Clear();
-                return ValueTask.FromResult(false);
-            }
-
-            if (SocketResource == null)
-            {
-                segments?.Clear();
-                BufferToSendMsg.Return(rentBytesToBuffer);
-                return ValueTask.FromResult(false);
-            }
-
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(SocketResource.RunObjMsgSend, t, segments, instance);
-            if (vt.IsCompletedSuccessfully)
-            {
-                var session = vt.Result;
-                segments?.Clear();
-                BufferToSendMsg.Return(rentBytesToBuffer);
-
-                return ValueTask.FromResult(session != 0);
-            }
-            return AwaitSendObjAsync(vt, segments, rentBytesToBuffer);
-        }
-
-        async ValueTask<bool> AwaitSendObjAsync(ValueTask<ulong> vt, EMemorySegment? segments, int buffer)
-        {
-            try
-            {
-                var session = await vt;
-                return session != 0;
-            }
-            finally
-            {
-                segments?.Clear();
-                BufferToSendMsg.Return(buffer);
-            }
+        public virtual ValueTask<bool> Send<T>(long instance, string target, T? obj) 
+        { 
+            return ValueTask.FromResult(false); 
         }
 
         /// <summary>

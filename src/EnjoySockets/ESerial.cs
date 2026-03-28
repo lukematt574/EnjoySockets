@@ -75,6 +75,7 @@ namespace EnjoySockets
         {
             try
             {
+                buffer.ResetWrittenCount();
                 MemoryPackSerializer.Serialize(buffer, myObj);
                 return buffer.WrittenSpan.Length;
             }

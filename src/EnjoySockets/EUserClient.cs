@@ -172,7 +172,7 @@ namespace EnjoySockets
 
             ulong session = SocketResource.GetSession();
             var sender = SocketResource.MsgCache.Get(session, t, instance, segments);
-            if(sender == null)
+            if (sender == null)
             {
                 segments?.Clear();
                 _controlSending.Release(ecsw);

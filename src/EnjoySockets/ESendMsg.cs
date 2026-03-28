@@ -28,7 +28,6 @@ namespace EnjoySockets
 
         Func<ESendMsg, ValueTask<bool>>? Func;
         EMemorySegment? CurrentSegment;
-        ReadOnlyMemory<byte>? CurrentSegmentBytes;
         int CurrentSegmentIndex;
         int ToWrite;
 
@@ -39,21 +38,8 @@ namespace EnjoySockets
             Session = 0;
             Instance = instance;
             CurrentSegment = firstSegment;
-            CurrentSegmentBytes = null;
             CurrentSegmentIndex = 0;
             ToWrite = TotalBytes = firstSegment != null ? firstSegment.WrittenBytes : 0;
-        }
-
-        internal void RunPrepare(Func<ESendMsg, ValueTask<bool>> _task, ulong target, ReadOnlyMemory<byte>? segment, long instance)
-        {
-            Func = _task;
-            Target = target;
-            Session = 0;
-            Instance = instance;
-            CurrentSegment = null;
-            CurrentSegmentBytes = segment;
-            CurrentSegmentIndex = 0;
-            ToWrite = TotalBytes = CurrentSegmentBytes.HasValue ? CurrentSegmentBytes.Value.Length : 0;
         }
 
         internal int FillSpan(Span<byte> data)
@@ -62,17 +48,9 @@ namespace EnjoySockets
                 return 0;
 
             int toCopy = Math.Min(data.Length, ToWrite);
-            if (CurrentSegment == null)
-            {
-                if (CurrentSegmentBytes != null)
-                {
-                    CurrentSegmentBytes.Value.Slice(CurrentSegmentIndex, toCopy).Span.CopyTo(data);
-                    CurrentSegmentIndex += toCopy;
-                }
-            }
-            else
+            if (CurrentSegment != null)
                 CurrentSegment = EMemorySegment.FillSpan(data, CurrentSegment, ref CurrentSegmentIndex, toCopy);
-
+                
             ToWrite -= toCopy;
             return toCopy;
         }
@@ -123,7 +101,6 @@ namespace EnjoySockets
         {
             if (ToWrite < 1)
             {
-                CurrentSegmentBytes = null;
                 CurrentSegment = null;
             }
         }
