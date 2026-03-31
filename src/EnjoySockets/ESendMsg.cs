@@ -4,10 +4,10 @@ using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
-    internal class ESendMsg
+    internal class ESendMsgPool
     {
-        static readonly ConcurrentStack<ESendMsg> _pool = new();
-        internal static ESendMsg Rent()
+        readonly ConcurrentStack<ESendMsg> _pool = new();
+        internal ESendMsg Rent()
         {
             if (_pool.TryPop(out var s))
                 return s;
@@ -15,12 +15,15 @@ namespace EnjoySockets
                 return new ESendMsg();
         }
 
-        internal static void Return(ESendMsg? obj)
+        internal void Return(ESendMsg? obj)
         {
             if (obj == null) return;
             _pool.Push(obj);
         }
+    }
 
+    internal class ESendMsg
+    {
         public ulong Target { get; private set; }
         public long Instance { get; private set; }
         public int TotalBytes { get; private set; }
@@ -50,7 +53,7 @@ namespace EnjoySockets
             int toCopy = Math.Min(data.Length, ToWrite);
             if (CurrentSegment != null)
                 CurrentSegment = EMemorySegment.FillSpan(data, CurrentSegment, ref CurrentSegmentIndex, toCopy);
-                
+
             ToWrite -= toCopy;
             return toCopy;
         }

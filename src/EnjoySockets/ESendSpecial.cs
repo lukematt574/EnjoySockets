@@ -4,10 +4,10 @@ using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
-    internal class ESendSpecial
+    internal class ESendSpecialPool
     {
-        static readonly ConcurrentStack<ESendSpecial> _pool = new();
-        internal static ESendSpecial Rent()
+        readonly ConcurrentStack<ESendSpecial> _pool = new();
+        internal ESendSpecial Rent()
         {
             if (_pool.TryPop(out var s))
                 return s;
@@ -15,12 +15,15 @@ namespace EnjoySockets
                 return new ESendSpecial();
         }
 
-        internal static void Return(ESendSpecial? obj)
+        internal void Return(ESendSpecial? obj)
         {
             if (obj == null) return;
             _pool.Push(obj);
         }
+    }
 
+    internal class ESendSpecial
+    {
         Func<ulong, ulong, long?, ValueTask<bool>>? Func;
         ulong Session, TypeMsg;
         long? Msg;

@@ -1,4 +1,4 @@
-﻿// Copyright (c) Luke Matt. All rights reserved.
+// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using EnjoySockets.DTO;
 using System.Net;
@@ -158,7 +158,7 @@ namespace EnjoySockets
             }
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
-            length = length < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : length;
+            length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
             EControlSendingWaiter? ecsw;
             if ((ecsw = _controlSending.TryWait(length)) == null)
                 ecsw = await _controlSending.Wait(length);
@@ -179,7 +179,7 @@ namespace EnjoySockets
                 return -1;
             }
 
-            var objMsg = ESendMsg.Rent();
+            var objMsg = SocketResource.ChannelSend.MsgPool.Rent();
             objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
             objMsg.Session = session;
 
@@ -213,7 +213,7 @@ namespace EnjoySockets
             }
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
-            length = length < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : length;
+            length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
             EControlSendingWaiter? ecsw;
             if ((ecsw = _controlSending.TryWait(length)) == null)
                 ecsw = await _controlSending.Wait(length);
@@ -235,7 +235,7 @@ namespace EnjoySockets
                 return false;
             }
 
-            var objMsg = ESendMsg.Rent();
+            var objMsg = SocketResource.ChannelSend.MsgPool.Rent();
             objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
             objMsg.Session = session;
 

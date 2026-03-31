@@ -7,15 +7,22 @@ namespace EnjoySockets
         readonly ESocketResource _user;
         readonly ESingleTaskSemaphore _semaphore;
 
+        readonly ESendSpecialPool _specialPool;
+        readonly ESendHeartbeatPool _heartbeatPool;
+        public ESendMsgPool MsgPool { get; private set; }
+
         internal ESendChannel(ESocketResource user)
         {
             _user = user;
+            _specialPool = new ESendSpecialPool();
+            _heartbeatPool = new ESendHeartbeatPool();
+            MsgPool = new ESendMsgPool();
             _semaphore = new();
         }
 
         internal ValueTask<ulong> TrySendMsgAndGetSession(Func<ESendMsg, ValueTask<bool>> _task, ulong target, EMemorySegment? segments, long instance)
         {
-            var obj = ESendMsg.Rent();
+            var obj = MsgPool.Rent();
             obj.RunPrepare(_task, target, segments, instance);
             return TrySendMsgRun(obj);
         }
@@ -65,13 +72,13 @@ namespace EnjoySockets
             }
             finally
             {
-                ESendMsg.Return(obj);
+                MsgPool.Return(obj);
             }
         }
 
         internal async ValueTask<bool> TrySendSpecial(Func<ulong, ulong, long?, ValueTask<bool>> _task, ulong session, ulong typeMsg, long? msg)
         {
-            var obj = ESendSpecial.Rent();
+            var obj = _specialPool.Rent();
             obj.RunPrepare(_task, session, typeMsg, msg);
             try
             {
@@ -94,13 +101,13 @@ namespace EnjoySockets
             finally
             {
                 _semaphore.Release();
-                ESendSpecial.Return(obj);
+                _specialPool.Return(obj);
             }
         }
 
         internal async ValueTask<bool> TrySendHeartbeat(Func<ValueTask<bool>> _task)
         {
-            var obj = ESendHeartbeat.Rent();
+            var obj = _heartbeatPool.Rent();
             obj.RunPrepare(_task);
             try
             {
@@ -123,7 +130,7 @@ namespace EnjoySockets
             finally
             {
                 _semaphore.Release();
-                ESendHeartbeat.Return(obj);
+                _heartbeatPool.Return(obj);
             }
         }
     }

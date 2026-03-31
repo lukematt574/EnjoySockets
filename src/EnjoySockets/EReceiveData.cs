@@ -42,7 +42,7 @@ namespace EnjoySockets
             Instance = instance;
         }
 
-        internal virtual int TryPushPart(ReadOnlySpan<byte> part) { return 0; }
+        internal virtual int TryPushPart(ReadOnlySpan<byte> part, EMemorySegmentPool pool) { return 0; }
         internal ValueTask<long> Run()
         {
             var cell = Cell!;

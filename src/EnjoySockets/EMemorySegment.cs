@@ -5,6 +5,14 @@ using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
+    internal class EMemorySegmentPool
+    {
+        readonly ConcurrentStack<EMemorySegment> _pool = new();
+
+        internal EMemorySegment Rent() => _pool.TryPop(out var s) ? s : new EMemorySegment(this);
+        internal void Return(EMemorySegment obj) => _pool.Push(obj);
+    }
+
     /// <summary>
     /// Internal pooled buffer. Single-owner, NOT thread-safe.
     /// After calling Clear(), the instance must not be used.
@@ -14,29 +22,18 @@ namespace EnjoySockets
         const int _segmentSize = 2048;
 
         public EMemorySegment? ENext { get; protected set; }
-        public int RentBytes { get; private set; } = _segmentSize;
         public int WrittenBytes { get; private set; }
 
         readonly byte[] _buffer = new byte[_segmentSize];
         int _freeSpaceBuffer = _segmentSize;
         int _usedBytes = 0;
 
-        EMemorySegment()
+        EMemorySegmentPool _pool;
+
+        internal EMemorySegment(EMemorySegmentPool pool)
         {
+            _pool = pool;
             Memory = _buffer.AsMemory();
-        }
-
-        static readonly ConcurrentStack<EMemorySegment> _pool = new();
-
-        static EMemorySegment Rent() => _pool.TryPop(out var s) ? s : new EMemorySegment();
-        static void Return(EMemorySegment obj) => _pool.Push(obj);
-
-        /// <summary>
-        /// Return initial segment
-        /// </summary>
-        internal static EMemorySegment GetFirstSegment()
-        {
-            return Rent();
         }
 
         internal static EMemorySegment? FillSpan(Span<byte> buffer, EMemorySegment? segment, ref int offset, int maxRead)
@@ -75,8 +72,7 @@ namespace EnjoySockets
                 WrittenBytes += appended;
                 if (appended < 1)
                 {
-                    var next = GetFirstSegment();
-                    RentBytes += _segmentSize;
+                    var next = _pool.Rent();
                     next.RunningIndex = tail.RunningIndex + tail.Memory.Length;
                     tail.SetNext(next);
                     tail = next;
@@ -157,7 +153,6 @@ namespace EnjoySockets
                 var next = current.ENext;
                 current._freeSpaceBuffer = _segmentSize;
                 current._usedBytes = 0;
-                current.RentBytes = _segmentSize;
                 current.WrittenBytes = 0;
                 current.SetNext(null);
                 current.RunningIndex = 0;
@@ -165,7 +160,7 @@ namespace EnjoySockets
                 var toReturn = current;
                 current = next;
 
-                Return(toReturn);
+                _pool.Return(toReturn);
             }
         }
     }

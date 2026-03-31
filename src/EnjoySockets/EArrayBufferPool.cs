@@ -31,7 +31,6 @@ namespace EnjoySockets
         {
             if (_pool.TryPop(out var s))
             {
-                s.ResetWrittenCount();
                 return s;
             }
             else

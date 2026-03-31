@@ -4,10 +4,10 @@ using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
-    internal class ESendHeartbeat
+    internal class ESendHeartbeatPool
     {
-        static readonly ConcurrentStack<ESendHeartbeat> _pool = new();
-        internal static ESendHeartbeat Rent()
+        readonly ConcurrentStack<ESendHeartbeat> _pool = new();
+        internal ESendHeartbeat Rent()
         {
             if (_pool.TryPop(out var s))
                 return s;
@@ -15,12 +15,15 @@ namespace EnjoySockets
                 return new ESendHeartbeat();
         }
 
-        internal static void Return(ESendHeartbeat? obj)
+        internal void Return(ESendHeartbeat? obj)
         {
             if (obj == null) return;
             _pool.Push(obj);
         }
+    }
 
+    internal class ESendHeartbeat
+    {
         Func<ValueTask<bool>>? Func;
 
         internal void RunPrepare(Func<ValueTask<bool>> _task)

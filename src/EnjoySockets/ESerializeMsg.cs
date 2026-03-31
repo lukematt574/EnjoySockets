@@ -6,33 +6,27 @@ namespace EnjoySockets
     {
         object _lock = new();
         int _msgBuffer;
-        readonly EArrayBufferPool _bufferPool;
+        readonly EArrayBufferWriter _bufferWriter;
+        readonly EMemorySegmentPool _memorySegmentPool;
 
-        public ESerializeMsg(ETCPConfig config)
+        public ESerializeMsg(ETCPConfig config, EMemorySegmentPool segmentPool)
         {
             _msgBuffer = config.MessageBuffer < 2 ? 2048 : config.MessageBuffer * 1024;
-            _bufferPool = EArrayBufferPool.GetPool(_msgBuffer);
+            _bufferWriter = new EArrayBufferWriter(_msgBuffer);
+            _memorySegmentPool = segmentPool;
         }
 
         public EMemorySegment? ObjToSegments(object obj, Type t)
         {
             lock (_lock)
             {
-                var _buffer = _bufferPool.Rent();
-                try
-                {
-                    if (ESerial.Serialize(_buffer, obj, t) == 0 || _buffer.WrittenCount > _msgBuffer)
-                        return null;
+                if (ESerial.Serialize(_bufferWriter, obj, t) == 0 || _bufferWriter.WrittenCount > _msgBuffer)
+                    return null;
 
-                    var toWrite = EMemorySegment.GetFirstSegment();
-                    toWrite.Append(_buffer.WrittenSpan);
+                var toWrite = _memorySegmentPool.Rent();
+                toWrite.Append(_bufferWriter.WrittenSpan);
 
-                    return toWrite;
-                }
-                finally
-                {
-                    _bufferPool.Return(_buffer);
-                }
+                return toWrite;
             }
         }
     }

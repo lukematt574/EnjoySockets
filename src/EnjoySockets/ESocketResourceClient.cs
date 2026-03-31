@@ -140,7 +140,7 @@ namespace EnjoySockets
             var sender = MsgCache.SetBrokeMsgToSend(session, offset);
             if (sender != null)
             {
-                var obj = ESendMsg.Rent();
+                var obj = ChannelSend.MsgPool.Rent();
                 obj.RunPrepare(RunObjMsgSend, sender.Target, sender.Msg, sender.Instance);
                 obj.SetToWriteAndSession((long)offset!, sender.Session);
                 ChannelSend.TrySendMsgAndGetSession(obj);

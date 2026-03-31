@@ -1,25 +1,28 @@
-﻿// Copyright (c) Luke Matt. All rights reserved.
+// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
+    internal class EReceiveMsgPool
+    {
+        readonly ConcurrentStack<EReceiveMsg> _pool = new();
+
+        internal EReceiveMsg Rent() => _pool.TryPop(out var s) ? s : new EReceiveMsg(this);
+        internal void Return(EReceiveMsg message) => _pool.Push(message);
+    }
+
     internal class EReceiveMsg : EReceiveData
     {
         internal int WroteBytes { get; private set; }
 
         EMemorySegment? _pipeSegments;
+        EReceiveMsgPool _pool;
 
-        private EReceiveMsg()
+        internal EReceiveMsg(EReceiveMsgPool pool)
         {
+            _pool = pool;
             Form = EDataForm.Msg;
-        }
-
-        static readonly ConcurrentStack<EReceiveMsg> _pool = new();
-        static EReceiveMsg Rent() => _pool.TryPop(out var s) ? s : new EReceiveMsg();
-        static void Return(EReceiveMsg message)
-        {
-            _pool.Push(message);
         }
 
         internal static EReceiveMsg? Get(object? userObj, ESocketResource eUser, EBufferControl? buffer, ReadOnlySpan<byte> part, ERCell rCell)
@@ -30,7 +33,7 @@ namespace EnjoySockets
                 if (buffer != null)
                 {
                     var payloadLength = ESocketResource.ReadPayloadLength(part);
-                    rentBytes = payloadLength < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : payloadLength;
+                    rentBytes = Math.Max(payloadLength, ETCPSocket.MinBufferSlotSizeBytes);
                     if (!buffer.TryRent(rentBytes))
                         return null;
                 }
@@ -39,7 +42,7 @@ namespace EnjoySockets
                 if (!eUser.TryGetInstance(rCell, instanceId, out object? instance))
                     return null;
 
-                var eMsg = Rent();
+                var eMsg = eUser.ReceiveMsgPool.Rent();
                 eMsg.Initialize(userObj, rCell, buffer, instance, rentBytes, eUser);
                 eMsg.SetBasicData(part, instanceId);
                 eMsg.WroteBytes = 0;
@@ -57,7 +60,7 @@ namespace EnjoySockets
         /// 2 - buffer full (unable to rent memory [only server socket])
         /// 3 - invalid arguments (null Cell/BufferControl, empty data, or deserialization failure)
         /// </returns>
-        internal sealed override int TryPushPart(ReadOnlySpan<byte> part)
+        internal sealed override int TryPushPart(ReadOnlySpan<byte> part, EMemorySegmentPool segmentPool)
         {
             if (Cell == null)
                 return 3;
@@ -77,7 +80,7 @@ namespace EnjoySockets
             }
 
             if (_pipeSegments == null)
-                _pipeSegments = EMemorySegment.GetFirstSegment();
+                _pipeSegments = segmentPool.Rent();
             else
             {
                 if (BufferControl != null)
@@ -122,7 +125,7 @@ namespace EnjoySockets
             base.Dispose();
 
             ClearPipeSegments();
-            Return(this);
+            _pool.Return(this);
         }
 
         void ClearPipeSegments()

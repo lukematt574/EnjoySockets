@@ -191,7 +191,7 @@ namespace EnjoySockets
 
             try
             {
-                _servSocket = new(endPoint.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                _servSocket = new(endPoint.EndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { ExclusiveAddressUse = true };
                 _servSocket.Bind(endPoint.EndPoint);
                 _servSocket.Listen(Config.QueueSocketToAccept);
                 _currentClients = 0;

@@ -147,9 +147,9 @@ namespace EnjoySockets
             return Send<object>(instance, target, null);
         }
 
-        public virtual ValueTask<bool> Send<T>(long instance, string target, T? obj) 
-        { 
-            return ValueTask.FromResult(false); 
+        public virtual ValueTask<bool> Send<T>(long instance, string target, T? obj)
+        {
+            return ValueTask.FromResult(false);
         }
 
         /// <summary>

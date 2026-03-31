@@ -11,7 +11,6 @@ namespace EnjoySockets
         public long Instance { get; set; }
         public int TotalBytes { get; set; }
         public EMemorySegment? Msg { get; set; }
-        public ReadOnlyMemory<byte>? MsgBytes { get; set; }
         public bool Repeat { get; set; }
 
         ManualResetValueTaskSourceCore<long> _core;

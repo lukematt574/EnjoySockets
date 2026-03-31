@@ -1,6 +1,5 @@
-﻿// Copyright (c) Luke Matt. All rights reserved.
+// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
-using System;
 using System.Net.Sockets;
 using System.Reflection;
 
@@ -156,7 +155,7 @@ namespace EnjoySockets
                 return ValueTask.FromResult(false);
 
             var rentBytesToBuffer = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
-            rentBytesToBuffer = rentBytesToBuffer < ETCPSocket.MinBufferSlotSizeBytes ? ETCPSocket.MinBufferSlotSizeBytes : rentBytesToBuffer;
+            rentBytesToBuffer = Math.Max(rentBytesToBuffer, ETCPSocket.MinBufferSlotSizeBytes);
             if (!BufferToSendMsg.TryRent(rentBytesToBuffer))
             {
                 segments?.Clear();
@@ -212,7 +211,7 @@ namespace EnjoySockets
             EMemorySegment? segments = null;
             if (!obj.IsEmpty)
             {
-                segments = EMemorySegment.GetFirstSegment();
+                segments = socketResource.MemorySegmentPool.Rent();
                 segments.Append(obj);
             }
 

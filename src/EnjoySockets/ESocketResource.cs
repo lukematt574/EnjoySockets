@@ -38,6 +38,9 @@ namespace EnjoySockets
         internal EReceiveArgs ReceiveArgs { get; private set; }
         byte[] _sendBuffer;
 
+        internal EMemorySegmentPool MemorySegmentPool { get; private set; } = new();
+        internal EReceiveMsgPool ReceiveMsgPool { get; private set; } = new();
+
         private protected ECDiffieHellman ECDH { get; private set; }
         internal ReadOnlyMemory<byte> PublicKey { get; set; }
         internal ERSA Ersa { get; private set; }
@@ -58,7 +61,7 @@ namespace EnjoySockets
         internal ESocketResource(ETCPSocketType socketType, ETCPConfig config, ERSA rsa)
         {
             AESgcm = new EAesGcm(socketType);
-            ESerializeMsgObj = new ESerializeMsg(config);
+            ESerializeMsgObj = new ESerializeMsg(config, MemorySegmentPool);
             Config = config.Clone();
             MessageBuffer = Config.MessageBuffer * 1024;
             Heartbeat = Config.Heartbeat * 1000;
@@ -297,7 +300,7 @@ namespace EnjoySockets
 
         internal long TryPushReceiveDTO(EReceiveData eData, ReadOnlySpan<byte> dto)
         {
-            var result = eData.TryPushPart(dto);
+            var result = eData.TryPushPart(dto, MemorySegmentPool);
 
             if (result == 1)
                 return 1;

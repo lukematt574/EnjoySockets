@@ -9,8 +9,8 @@ namespace EnjoySockets
     /// </summary>
     internal class ECacheSender
     {
-        static readonly ConcurrentStack<ESender> _pool = new();
-        internal static ESender Rent()
+        readonly ConcurrentStack<ESender> _pool = new();
+        internal ESender Rent()
         {
             if (_pool.TryPop(out var s))
                 return s;
@@ -18,12 +18,11 @@ namespace EnjoySockets
                 return new ESender();
         }
 
-        internal static void Return(ESender? obj)
+        internal void Return(ESender? obj)
         {
             if (obj == null) return;
             obj.Msg?.Clear();
             obj.Msg = null;
-            obj.MsgBytes = null;
             obj.Session = 0;
             obj.Target = 0;
             obj.Instance = 0;
@@ -58,7 +57,7 @@ namespace EnjoySockets
             obj.Session = session;
             obj.Target = target;
             obj.Msg = msg;
-            obj.Instance = obj.Instance;
+            obj.Instance = instance;
             obj.TotalBytes = msg?.WrittenBytes ?? 0;
             obj.Repeat = true;
 
