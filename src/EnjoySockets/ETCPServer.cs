@@ -48,6 +48,7 @@ namespace EnjoySockets
         public Type? AuthorizationObj { get; private set; } = null;
 
         readonly ERSA _rsaKey;
+        readonly int _delayAfterFullError;
         Socket? _servSocket;
         MethodInfo? _authorizationMethod = null;
 
@@ -71,6 +72,7 @@ namespace EnjoySockets
             EReceiveCells.Initialize();
             Config = config?.Clone() ?? new ETCPServerConfig();
             _rsaKey = rsaKey.CloneObjectToServer();
+            _delayAfterFullError = Config.ResponseTimeout / 2;
             CheckUserObjAndTrySetAuth();
         }
 
@@ -470,6 +472,7 @@ namespace EnjoySockets
             else
             {
                 await ETCPSocket.Send(socket, _errorFullServer);
+                await Task.Delay(_delayAfterFullError);
             }
             ETCPSocket.ShutdownAndClose(socket);
             Interlocked.Decrement(ref _concurrentLogins);

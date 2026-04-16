@@ -36,7 +36,7 @@ namespace EnjoySockets
         /// The object to register. Must contain at least one non-static access method.
         /// </param>
         /// <returns>
-        /// The generated instance ID (&gt; 0).
+        /// The generated instance ID (&gt; 1_000_000).
         /// </returns>
         /// <exception cref="ArgumentNullException">
         /// Thrown if <paramref name="obj"/> is <see langword="null"/>.
@@ -166,13 +166,13 @@ namespace EnjoySockets
         /// </remarks>
         protected virtual void OnDisconnected() { }
 
-        static long LastId = DateTime.UtcNow.Ticks;
+        static long _lastId = Math.Max(1_000_000, DateTime.UtcNow.Ticks);
         /// <summary>
         /// Generates a thread-safe unique ID (long) for the entire application.
         /// </summary>
         public static long GetUniqueId()
         {
-            return Interlocked.Increment(ref LastId);
+            return Interlocked.Increment(ref _lastId);
         }
     }
 }

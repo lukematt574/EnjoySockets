@@ -7,12 +7,10 @@ namespace EnjoySockets
     internal class EReceiveChannel
     {
         readonly Channel<EReceiveData> _channel;
-        readonly bool _chPrivate;
 
         internal EReceiveChannel(bool chPrivate = true, ushort tasks = 1)
         {
-            _chPrivate = chPrivate;
-            _channel = Channel.CreateUnbounded<EReceiveData>(new UnboundedChannelOptions { SingleReader = tasks < 2, SingleWriter = _chPrivate });
+            _channel = Channel.CreateUnbounded<EReceiveData>(new UnboundedChannelOptions { SingleReader = tasks < 2, SingleWriter = chPrivate });
             for (int i = 0; i < tasks; i++)
                 _ = StartChannelReceive();
         }
@@ -34,12 +32,9 @@ namespace EnjoySockets
             }
         }
 
-        internal void Push(EReceiveData data)
+        internal bool Push(EReceiveData data)
         {
-            if (_chPrivate)
-                _channel.Writer.TryWrite(data);
-            else
-                _ = _channel.Writer.WriteAsync(data);
+            return _channel.Writer.TryWrite(data);
         }
     }
 }

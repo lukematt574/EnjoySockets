@@ -350,8 +350,8 @@ namespace EnjoySockets
                 if (channel != null && Running)
                 {
                     data.InChannel = true;
-                    channel.Push(data);
-                    return 0;
+                    if (channel.Push(data))
+                        return 0;
                 }
                 return 3;
             }

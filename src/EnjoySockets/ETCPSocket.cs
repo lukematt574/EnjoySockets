@@ -434,8 +434,9 @@ namespace EnjoySockets
         {
             try
             {
-                socket?.Shutdown(SocketShutdown.Both);
+                socket?.Shutdown(SocketShutdown.Send);
             }
+            catch { }
             finally
             {
                 Close(socket);
