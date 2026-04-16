@@ -560,14 +560,14 @@ Both sides share a consistent API for basic communication:
 On the server, performance is the absolute priority. The library focuses on pushing data to the OS socket buffer as fast as possible.
 
 * **Non-blocking:** The `Send` method returns a `bool` immediately, indicating if the data was successfully buffered.
-* **Pre-serialized Buffers:** For maximum efficiency (e.g., in **Multicast** scenarios), the server can send raw `ReadOnlyMemory<byte>`. This avoids redundant serialization when sending the same data to thousands of clients.
+* **Pre-serialized Buffers:** For maximum efficiency (e.g., in **Multicast** scenarios), the server can send raw `ReadOnlySpan<byte>` via `SendSerialized`. This avoids redundant serialization when sending the same data to thousands of clients.
 
 ```csharp
 // Multicast example
 var serializedData = ESerial.Serialize(myObject);
 foreach (var user in connectedUsers)
 {
-    user.Send("Target", serializedData); // Extremely fast, no re-serialization
+    user.SendSerialized("Target", serializedData); // Extremely fast, no re-serialization
 }
 
 ```
@@ -792,8 +792,8 @@ By using `user.InstanceRegister(object)`, you gain total control:
 
 The most common use case for `InstanceRegister` is when a client needs to interact with a specific object on the server (e.g., a specific Match, Trade, or Dialogue session).
 
-##### 1. Server-Side: Registration & ID Delivery
-
+1. Server-Side: Registration & ID Delivery
+---
 The server creates the instance and returns the unique ID to the client. Using `SendWithResponse` on the client side is the cleanest way to handle this.
 
 ```csharp
@@ -819,8 +819,8 @@ public class PlayerMatchService
 
 ```
 
-##### 2. Client-Side: Interaction using the ID
-
+2. Client-Side: Interaction using the ID
+---
 Once the client has the ID, they can target that specific instance on the server.
 
 ```csharp
@@ -839,8 +839,6 @@ public async Task StartGame()
 }
 
 ```
-
-#### 💡 Why this is powerful?
 
 * **No Ambiguity:** The client can be part of multiple "Matches" or "Trades" at once. By passing the `instanceId`, the server knows exactly which object should handle the incoming `JoinTeam` or `ReadyUp` call.
 * **Encapsulation:** The `GameMatch` class doesn't need to know about other matches. It only cares about the logic for its specific instance.
@@ -901,7 +899,7 @@ To register a pool, define a `const ushort` variable anywhere in your code and m
 public static class PoolIDs
 {
     // MaxPoolObjs defines the limit of objects held in the pool.
-    // Setting it >0
+    // Setting id >0
     [EAttrPool(MaxPoolObjs = 5000)]
     public const ushort Basic = 1;
 
@@ -1081,7 +1079,10 @@ The most common mistake in networking is serializing the same object multiple ti
 
 1. Serialize your data **once** into a buffer.
 2. Iterate through your target users.
-3. Send the **raw bytes** using the specific `Send` overload.
+3. Send the **raw bytes** using the `SendSerialized`.
+
+SendSerialized always completes synchronously, but the meaning of the returned value depends on the execution path.
+It returns true if the data has been successfully handed off for sending - either pushed directly to the OS socket buffer (fast path), or enqueued into an internal application buffer when the send operation falls back to async.
 
 ### High-Performance Serialization
 
@@ -1095,7 +1096,7 @@ Best for quick operations or when the frequency of multicasts is low.
 var serializedData = ESerial.Serialize(myData); // Allocates a new byte array
 foreach (var user in roomUsers)
 {
-    user.Send("OnUpdate", serializedData);
+    user.SendSerialized("OnUpdate", serializedData);
 }
 
 ```
@@ -1108,24 +1109,25 @@ For high-frequency updates (e.g., player positions), use `EArrayBufferWriter`. T
 // Define this outside your loop/method to reuse the memory
 private readonly EArrayBufferWriter _buffer = new(10 * 1024); // for example - 10KB initial capacity
 
+// This method must be executed on a single thread to avoid buffer overwrites.
+// The _buffer is reused and not thread-safe.
 public void BroadcastToAll(IEnumerable<MyUserServer> users, MyData data)
 {
-    _buffer.ResetWrittenCount(); // Reset the writer without deallocating the internal array
-    ESerial.Serialize(_buffer, data);
+    ESerial.Serialize(_buffer, data); // The writer is reset internally before writing
     
-    ReadOnlyMemory<byte> bytes = _buffer.WrittenMemory;
+    ReadOnlySpan<byte> bytes = _buffer.WrittenSpan;
 
     foreach (var user in users)
     {
         // High-speed transfer of raw memory
-        user.Send("OnUpdate", bytes);
+        user.SendSerialized("OnUpdate", bytes);
     }
 }
 
 ```
 
 > [!TIP]
-> By using `EArrayBufferWriter` and the `ReadOnlyMemory<byte>` overload of `Send`, you bypass the serialization logic for every user in the loop. This can result **performance increase** for large groups.
+> By using `EArrayBufferWriter` and the `ReadOnlySpan<byte>` via `SendSerialized`, you bypass the serialization logic for every user in the loop. This can result **performance increase** for large groups.
 
 ## 🌐 Scalability & Distributed Systems
 
