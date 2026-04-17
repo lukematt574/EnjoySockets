@@ -18,6 +18,40 @@ While working on numerous client-server projects, I often found myself lacking a
 * ⚖️ **Resource Control:** Robust flow control using `System.Threading.Channels` and object pooling.
 * 🔌 **Non-invasive:** Designed for easy adoption into existing codebases without major refactoring.
 
+## Benchmark Results
+
+Below is a comparison of the library with two popular libraries.
+
+![RTT Benchmark](./benchmarks/TcpRttBenchmark/assets/rtt-throughput-chart.png)
+
+### 1 Client
+
+| Library      | RTT (msg/s) | p50 (ms) | p95 (ms) | p99 (ms) |
+| ------------ | ----------- | -------- | -------- | -------- |
+| EnjoySockets | 19,847      | 0.050    | 0.060    | 0.065    |
+| SuperSocket  | 17,793      | 0.055    | 0.069    | 0.077    |
+| WatsonTCP    | 2,095       | 0.457    | 0.498    | 1.433    |
+
+### 5 Clients
+
+| Library      | RTT (msg/s) | p50 (ms) | p95 (ms) | p99 (ms) |
+| ------------ | ----------- | -------- | -------- | -------- |
+| EnjoySockets | 81,829      | 0.058    | 0.076    | 0.087    |
+| SuperSocket  | 61,883      | 0.083    | 0.099    | 0.108    |
+| WatsonTCP    | 6,565       | 0.638    | 1.819    | 2.290    |
+
+### 100 Clients
+
+| Library      | RTT (msg/s) | p50 (ms) | p95 (ms) | p99 (ms) |
+| ------------ | ----------- | -------- | -------- | -------- |
+| EnjoySockets | 234,156     | 0.390    | 0.554    | 1.429    |
+| SuperSocket  | 176,143     | 0.557    | 0.588    | 1.197    |
+| WatsonTCP    | 6,239       | 15.135   | 27.000   | 35.209   |
+
+The benchmark details can be found in the file: [TcpRttBenchmark README](./benchmarks/TcpRttBenchmark/README.md).
+
+---
+
 ## Contents
 
 **Basics**
