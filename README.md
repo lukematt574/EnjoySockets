@@ -77,6 +77,16 @@ The library leverages the **MemoryPack** engine by [neuecc](https://github.com/n
 > [!IMPORTANT]
 > For advanced serialization scenarios and proper attribute usage, please refer to the [MemoryPack documentation](https://github.com/Cysharp/MemoryPack).
 
+### Planned changes
+
+In future versions, the serialization system will be extended with the following changes:
+
+- **MemoryPack** will remain the default serialization engine
+- **MessagePack** will be added as an additional built-in option
+- The library will allow integration of custom binary serializers, enabling developers to plug in their own serialization implementations
+
+Additionally, will be remove all hard dependencies on specific serialization engines at the connection level. This will make it possible to fully reconstruct the client side on different platforms without being tied to a specific serializer implementation.
+
 ## Installation
 
 The library is available via NuGet:
