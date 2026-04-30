@@ -19,111 +19,111 @@ namespace EnjoySockets
 
         static readonly Dictionary<ushort, EAttrChannel> PrivateChannels = [];
         static readonly Dictionary<ushort, EReceiveChannel> ShareChannels = [];
+        static readonly Dictionary<ushort, EAttrPool> IdPoolMap = [];
 
         static EReceiveCells()
         {
-            var allTypes = Assembly.GetEntryAssembly()?.GetTypes();
-            if (allTypes != null)
-            {
-                var correctMethods = new List<(MethodInfo, Type)>();
-                foreach (var type in allTypes)
-                {
-                    if (!IsClass(type))
-                        continue;
-
-                    var methodsWithAttr = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                    if (methodsWithAttr.Length < 1)
-                        continue;
-
-                    foreach (var method in methodsWithAttr)
-                    {
-                        if (IsCorrectMethod(method, type))
-                            correctMethods.Add((method, type));
-                    }
-                }
-
-                var autoMethods = new Dictionary<string, List<(MethodInfo, Type)>>();
-                var autoInstanceClasses = new HashSet<Type>();
-                foreach (var obj in correctMethods)
-                {
-                    var methodName = obj.Item1.Name;
-                    if (autoInstanceClasses.Contains(obj.Item2) || obj.Item1.IsStatic || !IsNeverInstantiable(obj.Item2))
-                    {
-                        if (autoMethods.TryGetValue(methodName, out List<(MethodInfo, Type)>? iList))
-                            iList.Add(obj);
-                        else
-                            autoMethods.Add(methodName, [obj]);
-
-                        if (!obj.Item1.IsStatic)
-                            autoInstanceClasses.Add(obj.Item2);
-                    }
-                }
-
-                foreach (var obj in autoMethods)
-                    autoMethods[obj.Key] = [SelectBestAndLog(obj.Key, obj.Value)];
-
-                foreach (var obj in autoMethods)
-                {
-                    var target = GetUlongFromString(obj.Key);
-                    if (target == 0)
-                    {
-#if DEBUG
-                        Debug.WriteLine($"Unavailable method name: {obj.Key}");
-#endif
-                        continue;
-                    }
-
-                    var objVal = obj.Value.First();
-                    var classAttr = objVal.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
-                    var cell = GetRCell(objVal.Item1, classAttr, objVal.Item2);
-                    if (!Cells.TryGetValue(target, out _))
-                    {
-                        Cells.Add(target, cell);
-                    }
-                    else
-                    {
-#if DEBUG
-                        Debug.WriteLine($"Repeated method name: {obj.Key}");
-#endif
-                    }
-                }
-
-                foreach (var obj in correctMethods)
-                {
-                    if (obj.Item1.IsStatic)
-                        continue;
-
-                    var target = GetUlongFromString(obj.Item1.Name);
-                    if (target == 0)
-                        continue;
-
-                    var classAttr = obj.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
-                    var cell = GetRCell(obj.Item1, classAttr, obj.Item2);
-                    if (!CellsInstanceId.TryGetValue(obj.Item2, out Dictionary<ulong, ERCell>? dict))
-                        CellsInstanceId.Add(obj.Item2, new() { { target, cell } });
-                    else
-                    {
-                        if (dict.TryGetValue(target, out ERCell? targetCell))
-                        {
-                            var x = GetInheritanceDepth(targetCell.MethodInfo.DeclaringType!);
-                            var y = GetInheritanceDepth(cell.MethodInfo.DeclaringType!);
-                            if (y > x)
-                                dict[target] = cell;
-                        }
-                        else
-                            dict.Add(target, cell);
-                    }
-                }
-            }
-            else
+            var eAssembly = Assembly.GetEntryAssembly();
+            if (eAssembly == null)
                 return;
 
-            SetChannels();
+            var allTypes = eAssembly.GetTypes();
+            MapPoolObjs(eAssembly);
+
+            var correctMethods = new List<(MethodInfo, Type)>();
+            foreach (var type in allTypes)
+            {
+                if (!IsClass(type))
+                    continue;
+
+                var methodsWithAttr = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                if (methodsWithAttr.Length < 1)
+                    continue;
+
+                foreach (var method in methodsWithAttr)
+                {
+                    if (IsCorrectMethod(method, type))
+                        correctMethods.Add((method, type));
+                }
+            }
+
+            var autoMethods = new Dictionary<string, List<(MethodInfo, Type)>>();
+            var autoInstanceClasses = new HashSet<Type>();
+            foreach (var obj in correctMethods)
+            {
+                var methodName = obj.Item1.Name;
+                if (autoInstanceClasses.Contains(obj.Item2) || obj.Item1.IsStatic || !IsNeverInstantiable(obj.Item2))
+                {
+                    if (autoMethods.TryGetValue(methodName, out List<(MethodInfo, Type)>? iList))
+                        iList.Add(obj);
+                    else
+                        autoMethods.Add(methodName, [obj]);
+
+                    if (!obj.Item1.IsStatic)
+                        autoInstanceClasses.Add(obj.Item2);
+                }
+            }
+
+            foreach (var obj in autoMethods)
+                autoMethods[obj.Key] = [SelectBestAndLog(obj.Key, obj.Value)];
+
+            foreach (var obj in autoMethods)
+            {
+                var target = GetUlongFromString(obj.Key);
+                if (target == 0)
+                {
+#if DEBUG
+                    Debug.WriteLine($"Unavailable method name: {obj.Key}");
+#endif
+                    continue;
+                }
+
+                var objVal = obj.Value.First();
+                var classAttr = objVal.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
+                var cell = GetRCell(objVal.Item1, classAttr, objVal.Item2);
+                if (!Cells.TryGetValue(target, out _))
+                {
+                    Cells.Add(target, cell);
+                }
+                else
+                {
+#if DEBUG
+                    Debug.WriteLine($"Repeated method name: {obj.Key}");
+#endif
+                }
+            }
+
+            foreach (var obj in correctMethods)
+            {
+                if (obj.Item1.IsStatic)
+                    continue;
+
+                var target = GetUlongFromString(obj.Item1.Name);
+                if (target == 0)
+                    continue;
+
+                var classAttr = obj.Item2.GetCustomAttribute(typeof(EAttr)) as EAttr;
+                var cell = GetRCell(obj.Item1, classAttr, obj.Item2);
+                if (!CellsInstanceId.TryGetValue(obj.Item2, out Dictionary<ulong, ERCell>? dict))
+                    CellsInstanceId.Add(obj.Item2, new() { { target, cell } });
+                else
+                {
+                    if (dict.TryGetValue(target, out ERCell? targetCell))
+                    {
+                        var x = GetInheritanceDepth(targetCell.MethodInfo.DeclaringType!);
+                        var y = GetInheritanceDepth(cell.MethodInfo.DeclaringType!);
+                        if (y > x)
+                            dict[target] = cell;
+                    }
+                    else
+                        dict.Add(target, cell);
+                }
+            }
+            SetChannels(eAssembly);
         }
 
-        static void SetChannels()
+        static void SetChannels(Assembly assembly)
         {
-            var assembly = Assembly.GetEntryAssembly();
             var list = assembly!
                         .GetTypes()
                         .SelectMany(t => t.GetFields(
@@ -162,6 +162,44 @@ namespace EnjoySockets
                 {
 #if DEBUG
                     Debug.WriteLine($"Repeated channel id: {Value}");
+#endif
+                }
+            }
+        }
+
+        static void MapPoolObjs(Assembly assembly)
+        {
+            var list = assembly!
+                        .GetTypes()
+                        .SelectMany(t => t.GetFields(
+                            BindingFlags.Public |
+                            BindingFlags.NonPublic |
+                            BindingFlags.Static))
+                        .Where(f =>
+                            f.IsLiteral &&
+                            f.FieldType == typeof(ushort))
+                        .Select(f => new
+                        {
+                            Field = f,
+                            Attr = f.GetCustomAttribute<EAttrPool>()
+                        })
+                        .Where(x => x.Attr != null)
+                        .Select(x => (
+                            Value: (ushort)x.Field.GetRawConstantValue()!,
+                            Attr: x.Attr!
+                        ))
+                        .ToList();
+
+            foreach (var (Value, Attr) in list)
+            {
+                if (!IdPoolMap.TryGetValue(Value, out _))
+                {
+                    IdPoolMap.Add(Value, Attr);
+                }
+                else
+                {
+#if DEBUG
+                    Debug.WriteLine($"Repeated pool obj id: {Value}");
 #endif
                 }
             }
@@ -389,7 +427,11 @@ namespace EnjoySockets
             var tempAttr = mAttr?.Clone() ?? DefAttr.Clone();
             tempAttr.Fill(classAttr);
 
-            return new ERCell(socketType, tempAttr, methodInfo, argType, allowNull, GetPool(argType, tempAttr.PoolId, 0, allowNull), classType);
+            uint maxObjPool = 0;
+            if (IdPoolMap.TryGetValue(tempAttr.PoolId, out EAttrPool? eattrpool))
+                maxObjPool = eattrpool.MaxPoolObjs;
+
+            return new ERCell(socketType, tempAttr, methodInfo, argType, allowNull, GetPool(argType, tempAttr.PoolId, maxObjPool, allowNull), classType);
         }
 
         static bool IsOrSubclassOf(Type type, Type baseType) => type == baseType || type.IsSubclassOf(baseType);
