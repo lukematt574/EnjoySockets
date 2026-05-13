@@ -8,7 +8,7 @@ namespace EnjoySockets
     public abstract class EUser<T1> where T1 : ESocketResource
     {
         internal Guid UserId { get; set; }
-
+        public IESerializer ESerial { get; private set; }
         public EndPoint? EndPointSocket { get => SocketResource?.BasicSocket?.RemoteEndPoint; }
         public AddressFamily? AddressFamilySocket { get => SocketResource?.BasicSocket?.AddressFamily; }
 
@@ -21,6 +21,7 @@ namespace EnjoySockets
         {
             SocketResource = esr;
             BufferToSendMsg = new(SocketResource.MessageBuffer);
+            ESerial = esr.Config.ESerial;
         }
 
         internal virtual bool Start()
