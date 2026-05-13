@@ -73,19 +73,14 @@ The benchmark details can be found in the file: [TcpRttBenchmark README](./bench
 
 ## Serialization
 
-The library leverages the **MemoryPack** engine by [neuecc](https://github.com/neuecc) to ensure the most efficient serialization possible. 
+The library uses **MemoryPack** as the default serializer for high-performance binary serialization.
+
+You can also provide your own binary serializer implementation (for example **MessagePack** or **Protocol Buffers**) through the `ESerial` property in `ETCPConfig`.
+
+To implement a custom serializer, create a class that implements the `IESerializer` interface and assign an instance of that class to the configuration.
+
 > [!IMPORTANT]
-> For advanced serialization scenarios and proper attribute usage, please refer to the [MemoryPack documentation](https://github.com/Cysharp/MemoryPack).
-
-### Planned changes
-
-In future versions, the serialization system will be extended with the following changes:
-
-- **MemoryPack** will remain the default serialization engine
-- **MessagePack** will be added as an additional built-in option
-- The library will allow integration of custom binary serializers, enabling developers to plug in their own serialization implementations
-
-Additionally, will be remove all hard dependencies on specific serialization engines at the connection level. This will make it possible to fully reconstruct the client side on different platforms without being tied to a specific serializer implementation.
+> When using the default **MemoryPack** serializer, for advanced serialization scenarios and proper attribute usage, please refer to the [MemoryPack documentation](https://github.com/Cysharp/MemoryPack).
 
 ## Installation
 
@@ -115,7 +110,7 @@ To ensure your application works correctly with Native AOT, add the following se
 
 <ItemGroup>
   <TrimmerRootAssembly Include="EnjoySockets" />
-  <TrimmerRootAssembly Include="YourProject.Logic" />
+  <TrimmerRootAssembly Include="YourProject" />
 </ItemGroup>
 
 ```
@@ -608,7 +603,7 @@ On the server, performance is the absolute priority. The library focuses on push
 
 ```csharp
 // Multicast example
-var serializedData = ESerial.Serialize(myObject);
+var serializedData = user.ESerial.Serialize(myObject);
 foreach (var user in connectedUsers)
 {
     user.SendSerialized("Target", serializedData); // Extremely fast, no re-serialization
@@ -1137,7 +1132,7 @@ You have two ways to prepare your data for multicast:
 Best for quick operations or when the frequency of multicasts is low.
 
 ```csharp
-var serializedData = ESerial.Serialize(myData); // Allocates a new byte array
+var serializedData = user.ESerial.Serialize(myData); // Allocates a new byte array
 foreach (var user in roomUsers)
 {
     user.SendSerialized("OnUpdate", serializedData);
@@ -1152,12 +1147,13 @@ For high-frequency updates (e.g., player positions), use `EArrayBufferWriter`. T
 ```csharp
 // Define this outside your loop/method to reuse the memory
 private readonly EArrayBufferWriter _buffer = new(10 * 1024); // for example - 10KB initial capacity
+private ESerialMemoryPack _serial = new();
 
 // This method must be executed on a single thread to avoid buffer overwrites.
 // The _buffer is reused and not thread-safe.
 public void BroadcastToAll(IEnumerable<MyUserServer> users, MyData data)
 {
-    ESerial.Serialize(_buffer, data); // The writer is reset internally before writing
+    _serial.Serialize(_buffer, data); // The writer is reset internally before writing
     
     ReadOnlySpan<byte> bytes = _buffer.WrittenSpan;
 
