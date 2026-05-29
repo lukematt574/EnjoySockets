@@ -54,7 +54,7 @@ namespace EnjoySockets
 #if DEBUG
             if (id == null || id <= 0)
                 throw new InvalidOperationException(
-                    $"Private instance of type '{obj.GetType().FullName}' cannot be registered. No exist any one fit method for: {ESocketType}");
+                    $"Private instance of type '{obj.GetType().FullName}' cannot be registered. No exist any one fit method for: {SocketResource?.SocketType}");
 #endif
 
             return id ?? 0;
@@ -166,7 +166,8 @@ namespace EnjoySockets
         /// </remarks>
         protected virtual void OnDisconnected() { }
 
-        static long _lastId = Math.Max(1_000_000, DateTime.UtcNow.Ticks);
+        internal const long MinUniqueId = 1_000_000;
+        static long _lastId = Math.Max(MinUniqueId, DateTime.UtcNow.Ticks);
         /// <summary>
         /// Generates a thread-safe unique ID (long) for the entire application.
         /// </summary>

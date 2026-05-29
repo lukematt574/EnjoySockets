@@ -82,30 +82,30 @@ namespace EnjoySockets
         /// Sends a message without payload to the specified target,
         /// and awaits a guaranteed response.
         /// </summary>
-        /// <inheritdoc cref="SendWithResponse{T}(long, string, T)"/>
-        public ValueTask<long> SendWithResponse(string target)
+        /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
+        public ValueTask<ETransactResult> SendTransact(string target)
         {
-            return SendWithResponse(0, target);
+            return SendTransact(0, target);
         }
 
         /// <summary>
         /// Sends a message with payload to the specified target,
         /// and awaits a guaranteed response.
         /// </summary>
-        /// <inheritdoc cref="SendWithResponse{T}(long, string, T)"/>
-        public ValueTask<long> SendWithResponse<T>(string target, T obj)
+        /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
+        public ValueTask<ETransactResult> SendTransact<T>(string target, T obj)
         {
-            return SendWithResponse(0, target, obj);
+            return SendTransact(0, target, obj);
         }
 
         /// <summary>
         /// Sends a message without payload to the specified target and instance,
         /// and awaits a guaranteed response.
         /// </summary>
-        /// <inheritdoc cref="SendWithResponse{T}(long, string, T)"/>
-        public ValueTask<long> SendWithResponse(long instance, string target)
+        /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
+        public ValueTask<ETransactResult> SendTransact(long instance, string target)
         {
-            return SendWithResponse<object>(instance, target, null);
+            return SendTransact<object>(instance, target, null);
         }
 
         /// <summary>
@@ -138,23 +138,23 @@ namespace EnjoySockets
         /// A <see langword="long"/> representing the outcome:
         /// <c>0</c> for success, &lt;0 for predefined errors, &gt;0 for user-defined results.
         /// </returns>
-        public async ValueTask<long> SendWithResponse<T>(long instance, string target, T? obj)
+        public async ValueTask<ETransactResult> SendTransact<T>(long instance, string target, T? obj)
         {
             if (SocketResource?.BasicSocket == null)
-                return -1;
+                return ETransactResult.ExecutionFailed;
 
             var t = EReceiveCells.GetUlongToSend(target);
-            if (t < 1) return -1;
+            if (t < 1) return ETransactResult.ExecutionFailed;
 
             var segments = SocketResource.ObjToSegments(obj);
 
             if (segments == null && obj != null)
-                return -1;
+                return ETransactResult.ExecutionFailed;
 
             if (segments != null && segments.WrittenBytes > SocketResource.MessageBuffer)
             {
                 segments?.Clear();
-                return -1;
+                return ETransactResult.ExecutionFailed;
             }
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
@@ -167,7 +167,7 @@ namespace EnjoySockets
             {
                 segments?.Clear();
                 _controlSending.Release(ecsw);
-                return -1;
+                return ETransactResult.ExecutionFailed;
             }
 
             ulong session = SocketResource.GetSession();
@@ -176,7 +176,7 @@ namespace EnjoySockets
             {
                 segments?.Clear();
                 _controlSending.Release(ecsw);
-                return -1;
+                return ETransactResult.ExecutionFailed;
             }
 
             var objMsg = SocketResource.ChannelSend.MsgPool.Rent();
@@ -310,24 +310,23 @@ namespace EnjoySockets
         /// A <see cref="byte"/> status code representing the result of the connection attempt:
         /// <list type="table">
         /// <item><term>0</term><description>Connection succeeded.</description></item>
-        /// <item><term>1</term><description>Invalid IP address or endpoint.</description></item>
+        /// <item><term>1</term><description>Invalid endpoint (IP or address).</description></item>
         /// <item><term>2</term><description>Connection attempt timed out.</description></item>
-        /// <item><term>3</term><description>The server is full.</description></item>
+        /// <item><term>3</term><description>Server is full.</description></item>
         /// <item><term>4</term><description>Server verification failed.</description></item>
-        /// <item><term>5</term><description>Failed to establish encryption key.</description></item>
-        /// <item><term>6</term><description>General connection failure.</description></item>
-        /// <item><term>7</term><description>Failed to send authorization data.</description></item>
-        /// <item><term>8</term><description>Invalid authorization data received.</description></item>
-        /// <item><term>9</term><description>Connection is already active or in progress.</description></item>
-        /// <item><term>10</term><description>Reconnect interrupted via <c>Disconnect</c>.</description></item>
+        /// <item><term>5</term><description>Handshake (encryption key exchange) failed.</description></item>
+        /// <item><term>6</term><description>Server unavailable or connection failed.</description></item>
+        /// <item><term>7</term><description>Invalid authentication data.</description></item>
+        /// <item><term>8</term><description>Connection already active or in progress.</description></item>
+        /// <item><term>9</term><description>Reconnect cancelled via Disconnect.</description></item>
         /// </list>
-        /// Values &gt; 10 may be used for custom authorization error codes if authorization is implemented.
+        /// Values &gt; 9 may be used for custom authorization error codes if authorization is implemented.
         /// </returns>
         /// <remarks>
         /// The reconnect loop can be interrupted by calling <see cref="Disconnect"/>.
         /// This method builds on <see cref="Connect(EAddress?)"/> but adds automatic reconnection logic.
         /// </remarks>
-        public Task<byte> ConnectWithAutoReconnect(EAddress? eAddress, int reconnectDelayMs = 5000)
+        public Task<EConnectResult> ConnectWithAutoReconnect(EAddress? eAddress, int reconnectDelayMs = 5000)
         {
             _reconnectDelayMs = reconnectDelayMs < _minReconnectDelayMs || reconnectDelayMs > _maxReconnectDelayMs ? 5000 : reconnectDelayMs;
             return Connect(eAddress);
@@ -357,7 +356,7 @@ namespace EnjoySockets
                 var time = _reconnectDelayMs;
                 if (time < 1)
                 {
-                    OnReconnectAttempt(attempt, 10);
+                    OnReconnectAttempt(attempt, 9);
                     return false;
                 }
 
@@ -388,34 +387,33 @@ namespace EnjoySockets
         /// A <see cref="byte"/> status code representing the result of the connection attempt:
         /// <list type="table">
         /// <item><term>0</term><description>Connection succeeded.</description></item>
-        /// <item><term>1</term><description>Invalid IP address or endpoint.</description></item>
+        /// <item><term>1</term><description>Invalid endpoint (IP or address).</description></item>
         /// <item><term>2</term><description>Connection attempt timed out.</description></item>
-        /// <item><term>3</term><description>The server is full.</description></item>
+        /// <item><term>3</term><description>Server is full.</description></item>
         /// <item><term>4</term><description>Server verification failed.</description></item>
-        /// <item><term>5</term><description>Failed to establish encryption key.</description></item>
-        /// <item><term>6</term><description>General connection failure.</description></item>
-        /// <item><term>7</term><description>Failed to send authorization data.</description></item>
-        /// <item><term>8</term><description>Invalid authorization data received.</description></item>
-        /// <item><term>9</term><description>Connection is already active or in progress.</description></item>
+        /// <item><term>5</term><description>Handshake (encryption key exchange) failed.</description></item>
+        /// <item><term>6</term><description>Server unavailable or connection failed.</description></item>
+        /// <item><term>7</term><description>Invalid authentication data.</description></item>
+        /// <item><term>8</term><description>Connection already active or in progress.</description></item>
         /// </list>
-        /// Values &gt; 10 may be used for custom authorization error codes if authorization is implemented.
+        /// Values &gt; 9 may be used for custom authorization error codes if authorization is implemented.
         /// </returns>
-        public async Task<byte> Connect(EAddress? eAddress)
+        public async Task<EConnectResult> Connect(EAddress? eAddress)
         {
             var addr = eAddress ?? Address;
             if (addr == null || addr.EndPoint == null)
-                return 1;
+                return EConnectResult.InvalidEndpoint;
 
             Address = addr;
             try
             {
                 if (SocketResource == null)
-                    return 6;
+                    return EConnectResult.ServerUnavailable;
 
                 lock (_lock)
                 {
                     if (_connecting)
-                        return 9;
+                        return EConnectResult.AlreadyConnectedOrConnecting;
 
                     _connecting = true;
                 }
@@ -424,7 +422,7 @@ namespace EnjoySockets
                 if (!SocketResource.AppendSocket(nSocket))
                 {
                     ETCPSocket.Close(nSocket);
-                    return 9;
+                    return EConnectResult.AlreadyConnectedOrConnecting;
                 }
 
                 var connectResult = await ConnectWithTimeout(SocketResource.BasicSocket!, addr.EndPoint, TimeSpan.FromSeconds(SocketResource.ConfigClient.ConnectTimeout));
@@ -440,7 +438,7 @@ namespace EnjoySockets
                     var control = ReadControl(responseDTO);
 
                     if (control == 0)
-                        return Close(4);
+                        return Close(EConnectResult.ServerVerificationFailed);
 
                     if (control == 3)
                         return Close(control);
@@ -449,7 +447,7 @@ namespace EnjoySockets
                     {
                         //old key
                         if (_firstConnect || !SocketResource.SetSalt())
-                            return Close(5);
+                            return Close(EConnectResult.HandshakeFailed);
 
                         if (control == 2)
                         {
@@ -460,7 +458,7 @@ namespace EnjoySockets
                             if (await SocketResource.SendAsEncryptBytes(SocketResource.Salt))
                             {
                                 Start();
-                                return 0;
+                                return EConnectResult.Success;
                             }
                         }
                     }
@@ -469,7 +467,7 @@ namespace EnjoySockets
                         var pKey = ReadPublicKey(responseDTO);
                         var signature = SocketResource.BuildSignature(pKey, SocketResource.Salt);
                         if (signature.Length < 1)
-                            return Close(5);
+                            return Close(EConnectResult.HandshakeFailed);
 
                         //new key
                         if (await SocketResource.Ersa.VerifyDataRsa(signature, ReadSign(responseDTO)))
@@ -482,25 +480,25 @@ namespace EnjoySockets
                                 else
                                 {
                                     Start();
-                                    return 0;
+                                    return EConnectResult.Success;
                                 }
                             }
-                            else return Close(5);
+                            else return Close(EConnectResult.HandshakeFailed);
                         }
                     }
                 }
-                else return Close(4);
+                else return Close(EConnectResult.ServerVerificationFailed);
             }
             catch
             {
-                return Close(6);
+                return Close(EConnectResult.ServerUnavailable);
             }
             finally
             {
                 lock (_lock)
                     _connecting = false;
             }
-            return Close(6);
+            return Close(EConnectResult.ServerUnavailable);
         }
 
         byte ReadControl(ReadOnlyMemory<byte> buffer) => buffer.Length < 1 ? (byte)0 : buffer.Span[0];
@@ -546,37 +544,37 @@ namespace EnjoySockets
         {
             var objAuth = GetAuthorization();
             if (objAuth == null || SocketResource == null)
-                return Close(8);
+                return Close(EConnectResult.InvalidAuthData);
 
             if (await SocketResource.SendBytes(objAuth))
             {
                 var msg = await SocketResource.ReceiveEncryptWithTimeout();
                 if (msg.Length < 1)
-                    return Close(6);
+                    return Close(EConnectResult.ServerUnavailable);
 
                 var resAuth = SocketResource.Config.ESerial.Deserialize<byte>(msg.Span);
                 if (resAuth == 0)
                     Start();
                 return resAuth;
             }
-            else return Close(7);
+            else return Close(EConnectResult.ServerUnavailable);
         }
 
-        async Task<byte> ConnectWithTimeout(Socket socket, IPEndPoint endpoint, TimeSpan timeout)
+        async Task<EConnectResult> ConnectWithTimeout(Socket socket, IPEndPoint endpoint, TimeSpan timeout)
         {
             using var cts = new CancellationTokenSource(timeout);
             try
             {
                 await socket.ConnectAsync(endpoint).WaitAsync(cts.Token);
-                return 0;
+                return EConnectResult.Success;
             }
             catch (OperationCanceledException)
             {
-                return 2;
+                return EConnectResult.Timeout;
             }
             catch
             {
-                return 6;
+                return EConnectResult.ServerUnavailable;
             }
         }
 
@@ -699,7 +697,7 @@ namespace EnjoySockets
                 Disconnect();
         }
 
-        byte Close(byte error)
+        EConnectResult Close(EConnectResult error)
         {
             ETCPSocket.Close(SocketResource?.BasicSocket);
             return error;
