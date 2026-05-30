@@ -10,9 +10,9 @@ namespace EnjoySockets
         internal byte[] Key { get; private set; } = new byte[32];
 
         AesGcm _cipherSend, _cipherReceive;
-        ETCPSocketType _socketType;
+        ESocketRole _socketRole;
 
-        public EAesGcm(ETCPSocketType type)
+        internal EAesGcm(ESocketRole sRole)
         {
             RandomNumberGenerator.Fill(Key);
 #if NET8_0
@@ -22,7 +22,7 @@ namespace EnjoySockets
             _cipherSend = new AesGcm(Key);
             _cipherReceive = new AesGcm(Key);
 #endif
-            _socketType = type;
+            _socketRole = sRole;
         }
 
         /// <summary>
@@ -33,7 +33,7 @@ namespace EnjoySockets
         /// <returns>
         /// true if the key was successfully derived and applied; otherwise false.
         /// </returns>
-        public bool SetKey(byte[]? key, ReadOnlySpan<byte> salt)
+        internal bool SetKey(byte[]? key, ReadOnlySpan<byte> salt)
         {
             if (key != null && key.Length == 32)
             {
@@ -62,11 +62,11 @@ namespace EnjoySockets
         }
 
         ulong _counter = 1;
-        public bool Encrypt(Span<byte> nonce, ReadOnlySpan<byte> plainBytes, Span<byte> buffer, Span<byte> tag)
+        internal bool Encrypt(Span<byte> nonce, ReadOnlySpan<byte> plainBytes, Span<byte> buffer, Span<byte> tag)
         {
             //set nonce
             if (nonce.Length != 12) return false;
-            if (_socketType == ETCPSocketType.Server)
+            if (_socketRole == ESocketRole.Server)
             {
                 RandomNumberGenerator.Fill(nonce.Slice(8, 4));
                 BinaryPrimitives.WriteUInt64LittleEndian(nonce.Slice(0, 8), ++_counter);
@@ -86,7 +86,7 @@ namespace EnjoySockets
             catch { return false; }
         }
 
-        public bool Decrypt(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> cipherBytes, Span<byte> buffer, ReadOnlySpan<byte> tag)
+        internal bool Decrypt(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> cipherBytes, Span<byte> buffer, ReadOnlySpan<byte> tag)
         {
             try
             {

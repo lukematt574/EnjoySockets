@@ -12,56 +12,56 @@ namespace EnjoySockets
         internal bool Running { get; private set; }
         private protected object _Lock = new();
 
-        public ETCPSocketType SocketType { get; private set; }
+        public ESocketRole SocketRole { get; }
         /// <summary>
         /// Buffer in bytes
         /// </summary>
-        internal int MessageBuffer { get; private set; }
-        internal ushort MaxEncryptPacket { get; private set; }
+        internal int MessageBuffer { get; }
+        internal ushort MaxEncryptPacket { get; }
         internal const ushort MinEncryptPacket = ETCPSocket.PacketEncryptHeader + ETCPSocket.PacketHeader;
         internal object? UserObj { get; set; }
 
         internal byte[] TokenToReconnect = new byte[32];
         private protected EArrayBufferPool _eArrayBufferPool = EArrayBufferPool.GetPool(ETCPSocket.MaxPacketSizeConnect);
-        private protected ESerializeMsg ESerializeMsgObj;
+        private protected MessageEncoder ESerializeMsgObj;
 
-        private protected EAesGcm AESgcm { get; private set; }
+        private protected EAesGcm AESgcm { get; }
 
         private protected ulong LastSessionReceive;
-        private protected Dictionary<ulong, EReceiveMsg> ReceiveDataSessions = [];
+        private protected Dictionary<ulong, MessageReceiveOperation> ReceiveDataSessions = [];
 
-        internal ESendChannel ChannelSend { get; private set; }
-        private protected EReceiveChannel ChannelReceiveBasic { get; private set; }
-        readonly Dictionary<ushort, EReceiveChannel> _privateChannels = [];
+        internal SendExecutor ExecutorSend { get; }
+        private protected ReceiveDispatcher BasicReceiveDispatcher { get; }
+        readonly Dictionary<ushort, ReceiveDispatcher> _privateChannels = [];
 
-        internal ESendArgs SendArgs { get; private set; }
-        internal EReceiveArgs ReceiveArgs { get; private set; }
+        internal SocketSendContext SendArgs { get; }
+        internal SocketReceiveContext ReceiveArgs { get; }
         byte[] _sendBuffer;
 
-        internal EMemorySegmentPool MemorySegmentPool { get; private set; } = new();
-        internal EReceiveMsgPool ReceiveMsgPool { get; private set; } = new();
+        internal MemorySegmentPool MemorySegmentPool { get; } = new();
+        internal MessageReceiveOperationPool ReceiveMsgPool { get; } = new();
 
-        private protected ECDiffieHellman ECDH { get; private set; }
+        private protected ECDiffieHellman ECDH { get; }
         internal ReadOnlyMemory<byte> PublicKey { get; set; }
-        internal ERSA Ersa { get; private set; }
+        internal ERSA Ersa { get; }
 
         readonly ECDiffieHellman _outPublicKey;
         readonly byte[] AESKey = new byte[32];
         private protected readonly byte[] ToSignature;
 
-        internal ETCPConfig Config { get; private set; }
-        internal int Heartbeat { get; private set; }
+        internal EConfig Config { get; }
+        internal int Heartbeat { get; }
 
-        private protected Dictionary<long, (object, Dictionary<ulong, ERCell>)> _privateInstances = [];
+        private protected Dictionary<long, (object, Dictionary<ulong, DispatchHandler>)> _privateInstances = [];
         private protected Dictionary<Type, object> _localInstances = [];
 
         internal Action<int>? RunOnPotentialSabotageEvent { get; set; }
         internal Action? RunDisposeEvent { get; set; }
 
-        internal ESocketResource(ETCPSocketType socketType, ETCPConfig config, ERSA rsa)
+        internal ESocketResource(ESocketRole socketRole, EConfig config, ERSA rsa)
         {
-            AESgcm = new EAesGcm(socketType);
-            ESerializeMsgObj = new ESerializeMsg(config, MemorySegmentPool);
+            AESgcm = new EAesGcm(socketRole);
+            ESerializeMsgObj = new MessageEncoder(config, MemorySegmentPool);
             Config = config.Clone();
             MessageBuffer = Config.MessageBuffer * 1024;
             Heartbeat = Config.Heartbeat * 1000;
@@ -69,7 +69,7 @@ namespace EnjoySockets
             MaxEncryptPacket = (ushort)(Config.MaxPacketSize + ETCPSocket.PacketEncryptHeader);
             SendArgs = new((ushort)(MaxEncryptPacket + ETCPSocket.PacketPrefixLength));
             ReceiveArgs = new(MaxEncryptPacket);
-            SocketType = socketType;
+            SocketRole = socketRole;
             Ersa = rsa;
             _outPublicKey = ECDiffieHellman.Create(Config.Curve);
             ECDH = ECDiffieHellman.Create(Config.Curve);
@@ -79,8 +79,8 @@ namespace EnjoySockets
             ERSA.HandshakeHeader.CopyTo(ToSignature);
             SetPublicKey(pk.AsMemory(0, pkLength));
 
-            ChannelSend = new(this);
-            ChannelReceiveBasic = new();
+            ExecutorSend = new(this);
+            BasicReceiveDispatcher = new();
         }
 
         private protected virtual void SetPublicKey(ReadOnlyMemory<byte> publicKey) { }
@@ -96,7 +96,7 @@ namespace EnjoySockets
                     return true;
                 }
             }
-            _ = ChannelSend.TrySendHeartbeat(RunHeartbeatSend);
+            _ = ExecutorSend.TrySendHeartbeat(RunHeartbeatSend);
             return false;
         }
 
@@ -173,13 +173,13 @@ namespace EnjoySockets
         /// Serialize object
         /// </summary>
         /// <returns>You must 'Clear' after use</returns>
-        internal EMemorySegment? ObjToSegments<T>(T obj)
+        internal MemorySegment? ObjToSegments<T>(T obj)
         {
             if (obj == null) return null;
-            return ESerializeMsgObj!.ObjToSegments(obj, typeof(T), Config.ESerial);
+            return ESerializeMsgObj!.EncodeToSegments(obj, typeof(T), Config.ESerial);
         }
 
-        internal virtual void DisposeReceiveDataFromChannel(EReceiveData? eData)
+        internal virtual void DisposeReceiveDataFromChannel(DataReceiveOperation? eData)
         {
             if (eData != null)
             {
@@ -196,7 +196,7 @@ namespace EnjoySockets
             if (BasicSocket == null)
                 return ValueTask.FromResult(false);
 
-            return ChannelSend.TrySendSpecial(RunSpecialSend, session, typeMsg, msg);
+            return ExecutorSend.TrySendSpecial(RunSpecialSend, session, typeMsg, msg);
         }
 
         internal bool Run()
@@ -261,10 +261,10 @@ namespace EnjoySockets
             if (dto.Length < ETCPSocket.PacketHeader)
                 return false;
 
-            if (dto[0] == (byte)EDataForm.Special)
+            if (dto[0] == (byte)DataForm.Special)
                 return ReceiveSpecial(dto);
 
-            EReceiveMsg? currentSession;
+            MessageReceiveOperation? currentSession;
             var session = ReadSession(dto);
             lock (_Lock)
                 ReceiveDataSessions.TryGetValue(session, out currentSession);
@@ -276,9 +276,9 @@ namespace EnjoySockets
                 else
                     return true;
 
-                var cell = GetReceiveCell(dto);
-                if (cell != null)
-                    RunReceiveMsg(cell, dto, session);
+                var handler = GetReceiveHandler(dto);
+                if (handler != null)
+                    RunReceiveMsg(handler, dto, session);
             }
             else
                 RunReceiveMsg(currentSession, dto);
@@ -286,7 +286,7 @@ namespace EnjoySockets
             return true;
         }
 
-        internal long TryPushReceiveDTO(EReceiveData eData, ReadOnlySpan<byte> dto)
+        internal long TryPushReceiveDTO(DataReceiveOperation eData, ReadOnlySpan<byte> dto)
         {
             var result = eData.TryPushPart(dto, MemorySegmentPool, Config.ESerial);
 
@@ -295,35 +295,35 @@ namespace EnjoySockets
 
             if (result == 0)
             {
-                var attr = eData.Cell?.AttrMethod;
+                var attr = eData.Handler?.MethodAttr;
                 if (attr != null)
                 {
                     if (attr.ChannelId == 0)
                     {
-                        return PushToChannelReceive(ChannelReceiveBasic, eData);
+                        return PushToReceiveDispatcher(BasicReceiveDispatcher, eData);
                     }
                     else
                     {
-                        if (_privateChannels.TryGetValue(attr.ChannelId, out EReceiveChannel? channelPr))
+                        if (_privateChannels.TryGetValue(attr.ChannelId, out ReceiveDispatcher? channelPr))
                         {
-                            return PushToChannelReceive(channelPr, eData);
+                            return PushToReceiveDispatcher(channelPr, eData);
                         }
-                        else if (EReceiveCells.TryGetShareChannel(attr.ChannelId, out EReceiveChannel? channel))
+                        else if (DispatcherRegistry.TryGetShareChannel(attr.ChannelId, out ReceiveDispatcher? channel))
                         {
-                            return PushToChannelReceive(channel, eData);
+                            return PushToReceiveDispatcher(channel, eData);
                         }
-                        else if (EReceiveCells.TryGetPrivateChannel(attr.ChannelId, out EAttrChannel? attrChannel))
+                        else if (DispatcherRegistry.TryGetPrivateChannel(attr.ChannelId, out EAttrChannel? attrChannel))
                         {
                             if (attrChannel != null)
                             {
-                                var endChannel = new EReceiveChannel(true, attrChannel.ChannelTasks);
-                                _privateChannels.Add(attr.ChannelId, endChannel);
-                                return PushToChannelReceive(endChannel, eData);
+                                var endDispatcher = new ReceiveDispatcher(true, attrChannel.ChannelTasks);
+                                _privateChannels.Add(attr.ChannelId, endDispatcher);
+                                return PushToReceiveDispatcher(endDispatcher, eData);
                             }
                         }
                         else
                         {
-                            return PushToChannelReceive(ChannelReceiveBasic, eData);
+                            return PushToReceiveDispatcher(BasicReceiveDispatcher, eData);
                         }
                     }
                 }
@@ -331,30 +331,30 @@ namespace EnjoySockets
             return result;
         }
 
-        int PushToChannelReceive(EReceiveChannel? channel, EReceiveData data)
+        int PushToReceiveDispatcher(ReceiveDispatcher? dispatcher, DataReceiveOperation data)
         {
             lock (_Lock)
             {
-                if (channel != null && Running)
+                if (dispatcher != null && Running)
                 {
                     data.InChannel = true;
-                    if (channel.Push(data))
+                    if (dispatcher.Dispatch(data))
                         return 0;
                 }
                 return 3;
             }
         }
 
-        private protected virtual ERCell? GetReceiveCell(ReadOnlySpan<byte> dto) { return null; }
-        private protected virtual void RunReceiveMsg(ERCell eData, ReadOnlySpan<byte> dto, ulong session) { }
-        private protected virtual void RunReceiveMsg(EReceiveData eData, ReadOnlySpan<byte> dto) { }
+        private protected virtual DispatchHandler? GetReceiveHandler(ReadOnlySpan<byte> dto) { return null; }
+        private protected virtual void RunReceiveMsg(DispatchHandler eData, ReadOnlySpan<byte> dto, ulong session) { }
+        private protected virtual void RunReceiveMsg(DataReceiveOperation eData, ReadOnlySpan<byte> dto) { }
         private protected virtual bool ReceiveSpecial(ReadOnlySpan<byte> dto) { return true; }
 
-        internal ValueTask<bool> RunObjMsgSend(ESendMsg msg)
+        internal ValueTask<bool> RunObjMsgSend(MessageSendOperation msg)
         {
             var sendBufferSpan = _sendBuffer.AsSpan();
 
-            sendBufferSpan[0] = (byte)EDataForm.Msg;
+            sendBufferSpan[0] = (byte)DataForm.Msg;
             if (msg.Session == 0) msg.Session = GetSession();
             WriteSession(sendBufferSpan, msg.Session);
             WriteTotalBytes(sendBufferSpan, msg.TotalBytes);
@@ -370,7 +370,7 @@ namespace EnjoySockets
         {
             var sendBufferSpan = _sendBuffer.AsSpan();
 
-            sendBufferSpan[0] = (byte)EDataForm.Special;
+            sendBufferSpan[0] = (byte)DataForm.Special;
             WriteSession(sendBufferSpan, session);
             WriteTarget(sendBufferSpan, typeMsg);
             var payloadLength = WriteMsgToPayload(sendBufferSpan, msg);
@@ -383,7 +383,7 @@ namespace EnjoySockets
         {
             var sendBufferSpan = _sendBuffer.AsSpan();
 
-            sendBufferSpan[0] = (byte)EDataForm.Special;
+            sendBufferSpan[0] = (byte)DataForm.Special;
             WriteTarget(sendBufferSpan, 0);
 
             SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader), AESgcm);
@@ -407,18 +407,18 @@ namespace EnjoySockets
                 await Task.Delay(Heartbeat * (running ? 1 : 2));
                 running = Running;
                 if (Running)
-                    await ChannelSend.TrySendHeartbeat(RunHeartbeatSend);
+                    await ExecutorSend.TrySendHeartbeat(RunHeartbeatSend);
             }
         }
 
         internal long RegisterPrivateInstance(object obj)
         {
             Type t = obj.GetType();
-            if (EReceiveCells.ExistInstanceCell(t, out Dictionary<ulong, ERCell>? val))
+            if (DispatcherRegistry.ExistInstanceHandler(t, out Dictionary<ulong, DispatchHandler>? val))
             {
-                if (val == null || !val.Any(x => x.Value.SocketType == SocketType))
+                if (val == null || !val.Any(x => x.Value.SocketRole == SocketRole))
                     return 0;
-                long id = EUserServer.GetUniqueId();
+                long id = EServerSession.GetUniqueId();
                 lock (_Lock)
                 {
                     _privateInstances.Add(id, (obj, val));
@@ -444,9 +444,9 @@ namespace EnjoySockets
             }
         }
 
-        internal bool TryGetInstance(ERCell cell, long instance, out object? obj)
+        internal bool TryGetInstance(DispatchHandler handler, long instance, out object? obj)
         {
-            if (cell.MethodInfo.IsStatic)
+            if (handler.MethodInfo.IsStatic)
             {
                 obj = null;
                 return true;
@@ -464,7 +464,7 @@ namespace EnjoySockets
                 }
             }
 
-            obj = GetLocalInstance(cell.ClassType);
+            obj = GetLocalInstance(handler.ClassType);
             return obj != null;
         }
 
@@ -517,7 +517,7 @@ namespace EnjoySockets
 
         private protected virtual void DisposeReceiveDataSessions()
         {
-            var listToRemove = new List<EReceiveMsg>();
+            var listToRemove = new List<MessageReceiveOperation>();
             lock (_Lock)
             {
                 foreach (var item in ReceiveDataSessions.Values)

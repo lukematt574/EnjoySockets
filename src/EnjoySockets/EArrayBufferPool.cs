@@ -8,7 +8,7 @@ namespace EnjoySockets
     {
         static ConcurrentDictionary<int, EArrayBufferPool> _pools = new();
 
-        public static EArrayBufferPool GetPool(int capacity)
+        internal static EArrayBufferPool GetPool(int capacity)
         {
             return _pools.GetOrAdd(capacity, GetPoolRun);
         }
@@ -18,7 +18,7 @@ namespace EnjoySockets
             return new EArrayBufferPool(capacity);
         }
 
-        public int Capacity { get; private set; }
+        internal int Capacity { get; private set; }
 
         readonly ConcurrentStack<EArrayBufferWriter> _pool = new();
 
@@ -27,17 +27,17 @@ namespace EnjoySockets
             Capacity = capacity;
         }
 
-        public EArrayBufferWriter Rent()
+        internal EArrayBufferWriter Rent()
         {
-            if (_pool.TryPop(out var s))
+            if (_pool.TryPop(out var buffer))
             {
-                return s;
+                return buffer;
             }
             else
                 return new(Capacity);
         }
 
-        public void Return(EArrayBufferWriter? buffer)
+        internal void Return(EArrayBufferWriter? buffer)
         {
             if (buffer == null || buffer.Capacity != Capacity)
                 return;

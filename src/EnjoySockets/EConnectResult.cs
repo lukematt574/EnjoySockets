@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 namespace EnjoySockets
 {
     /// <summary>
-    /// Connection result for 'Connect' or 'ConnectWithAutoReconnect' method on client side
+    /// Connection result for 'Connect' or 'ConnectWithAutoReconnect' method in <see cref="EClient"/>
     /// </summary>
     public readonly record struct EConnectResult(byte Code)
     {
@@ -24,7 +24,7 @@ namespace EnjoySockets
         /// </summary>
         /// <remarks>
         /// This result is triggered when the server does not respond within the
-        /// configured <see cref="ETCPClientConfig.ConnectTimeout"/> period.
+        /// configured <see cref="EClientConfig.ConnectTimeout"/> period.
         /// </remarks>
         public static readonly EConnectResult Timeout = new(2);
 

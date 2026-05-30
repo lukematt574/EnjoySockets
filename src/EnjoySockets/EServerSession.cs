@@ -5,18 +5,18 @@ using System.Reflection;
 
 namespace EnjoySockets
 {
-    public enum ESocketServerStatus
+    public enum EServerSessionStatus
     {
         Alive, ReconnectAttempt, BypassToReconnect, Dead
     }
 
-    public class EUserServer : EUser<ESocketResourceServer>
+    public class EServerSession : ESession<ESocketResourceServer>
     {
         /// <summary>
         /// Represents the current status of the socket server.
         /// </summary>
         /// <remarks>
-        /// Possible values of <see cref="ESocketServerStatus"/>:
+        /// Possible values of <see cref="EServerSessionStatus"/>:
         /// <list type="bullet">
         ///   <item><description><c>Alive</c> – the client is active and operational.</description></item>
         ///   <item><description><c>ReconnectAttempt</c> – the client is trying to reconnect.</description></item>
@@ -25,12 +25,15 @@ namespace EnjoySockets
         ///   allowing the garbage collector to collect it safely.</description></item>
         /// </list>
         /// </remarks>
-        public ESocketServerStatus Status { get; private set; } = ESocketServerStatus.Alive;
+        public EServerSessionStatus Status { get; private set; } = EServerSessionStatus.Alive;
         internal MethodInfo? AuthorizationMethod { get; set; }
-        internal Action<EUserServer, ESocketResourceServer?>? ReleaseEvent { get; set; }
+        internal Action<EServerSession, ESocketResourceServer?>? ReleaseEvent { get; set; }
 
-        public EUserServer(ESocketResourceServer eSocketResource) : base(eSocketResource)
+        private protected ServerBufferQuota BufferToSendMsg;
+
+        public EServerSession(ESocketResourceServer eSocketResource) : base(eSocketResource)
         {
+            BufferToSendMsg = new(eSocketResource.MessageBuffer);
             eSocketResource.CheckAccessEvent = OnCheckAccess;
             eSocketResource.RunOnPotentialSabotageEvent = PotentialSabotage;
             eSocketResource.RunDisposeEvent = Dispose;
@@ -40,10 +43,10 @@ namespace EnjoySockets
         {
             lock (_lock)
             {
-                if (Status == ESocketServerStatus.ReconnectAttempt || Status == ESocketServerStatus.Dead)
+                if (Status == EServerSessionStatus.ReconnectAttempt || Status == EServerSessionStatus.Dead)
                     return false;
 
-                Status = ESocketServerStatus.ReconnectAttempt;
+                Status = EServerSessionStatus.ReconnectAttempt;
             }
 
             if (SocketResource != null)
@@ -58,22 +61,22 @@ namespace EnjoySockets
         {
             lock (_lock)
             {
-                if (Status == ESocketServerStatus.ReconnectAttempt)
-                    Status = ESocketServerStatus.BypassToReconnect;
+                if (Status == EServerSessionStatus.ReconnectAttempt)
+                    Status = EServerSessionStatus.BypassToReconnect;
             }
         }
 
         internal sealed override bool Start()
         {
-            ESocketServerStatus status;
+            EServerSessionStatus status;
             lock (_lock)
                 status = Status;
 
-            if (status != ESocketServerStatus.Dead)
+            if (status != EServerSessionStatus.Dead)
             {
                 if (base.Start())
                 {
-                    if (status == ESocketServerStatus.Alive)
+                    if (status == EServerSessionStatus.Alive)
                     {
                         OnConnected();
                     }
@@ -81,9 +84,9 @@ namespace EnjoySockets
                     {
                         lock (_lock)
                         {
-                            if (Status == ESocketServerStatus.Dead)
+                            if (Status == EServerSessionStatus.Dead)
                                 return false;
-                            Status = ESocketServerStatus.Alive;
+                            Status = EServerSessionStatus.Alive;
                         }
                     }
                     return true;
@@ -106,11 +109,11 @@ namespace EnjoySockets
             bool dead;
             lock (_lock)
             {
-                dead = EReceiveArgs.IsSoftClose(SocketResource);
+                dead = SocketReceiveContext.IsSoftClose(SocketResource);
                 if (!dead)
                 {
-                    if (Status != ESocketServerStatus.ReconnectAttempt)
-                        Status = ESocketServerStatus.BypassToReconnect;
+                    if (Status != EServerSessionStatus.ReconnectAttempt)
+                        Status = EServerSessionStatus.BypassToReconnect;
                 }
             }
 
@@ -139,14 +142,14 @@ namespace EnjoySockets
         /// </returns>
         public override sealed ValueTask<bool> Send<T>(long instance, string target, T? obj) where T : default
         {
-            if (Status != ESocketServerStatus.Alive)
+            if (Status != EServerSessionStatus.Alive)
                 return ValueTask.FromResult(false);
 
             var socketResource = SocketResource;
             if (socketResource == null)
                 return ValueTask.FromResult(false);
 
-            var t = EReceiveCells.GetUlongToSend(target);
+            var t = DispatcherRegistry.GetUlongToSend(target);
             if (t < 1)
                 return ValueTask.FromResult(false);
 
@@ -162,7 +165,7 @@ namespace EnjoySockets
                 return ValueTask.FromResult(false);
             }
 
-            var vt = socketResource.ChannelSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
+            var vt = socketResource.ExecutorSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
             if (vt.IsCompletedSuccessfully)
             {
                 var session = vt.Result;
@@ -193,14 +196,14 @@ namespace EnjoySockets
         /// </returns>
         public bool SendSerialized(string target, ReadOnlySpan<byte> obj, long instance = 0)
         {
-            if (Status != ESocketServerStatus.Alive)
+            if (Status != EServerSessionStatus.Alive)
                 return false;
 
             var socketResource = SocketResource;
             if (socketResource == null)
                 return false;
 
-            var t = EReceiveCells.GetUlongToSend(target);
+            var t = DispatcherRegistry.GetUlongToSend(target);
             if (t < 1)
                 return false;
 
@@ -208,14 +211,14 @@ namespace EnjoySockets
             if (!BufferToSendMsg.TryRent(rentBytesToBuffer))
                 return false;
 
-            EMemorySegment? segments = null;
+            MemorySegment? segments = null;
             if (!obj.IsEmpty)
             {
                 segments = socketResource.MemorySegmentPool.Rent();
                 segments.Append(obj);
             }
 
-            var vt = socketResource.ChannelSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
+            var vt = socketResource.ExecutorSend.TrySendMsgAndGetSession(socketResource.RunObjMsgSend, t, segments, instance);
             if (vt.IsCompletedSuccessfully)
             {
                 segments?.Clear();
@@ -226,7 +229,7 @@ namespace EnjoySockets
             return true;
         }
 
-        async ValueTask<bool> AwaitSendObjAsync(ValueTask<ulong> vt, int buffer, EMemorySegment? segments)
+        async ValueTask<bool> AwaitSendObjAsync(ValueTask<ulong> vt, int buffer, MemorySegment? segments)
         {
             try
             {
@@ -309,7 +312,7 @@ namespace EnjoySockets
             ESocketResourceServer? esr = null;
             lock (_lock)
             {
-                Status = ESocketServerStatus.Dead;
+                Status = EServerSessionStatus.Dead;
                 if (SocketResource != null)
                 {
                     SocketResource.RunDisposeEvent = null;
@@ -327,7 +330,7 @@ namespace EnjoySockets
                 {
                     if (esr.IsEmptyReceiveDataSessions())
                     {
-                        esr.ClearResponseCache();
+                        esr.ClearResponseStore();
                         ReleaseEvent?.Invoke(this, esr);
                         ReleaseEvent = null;
                         OnDisconnected();
@@ -344,7 +347,7 @@ namespace EnjoySockets
             int id = 0;
             lock (_lock)
             {
-                if (Status == ESocketServerStatus.Dead)
+                if (Status == EServerSessionStatus.Dead)
                     return;
                 _idRunKeepAlive++;
                 id = _idRunKeepAlive;
@@ -357,8 +360,8 @@ namespace EnjoySockets
 
             lock (_lock)
             {
-                if ((Status == ESocketServerStatus.BypassToReconnect || Status == ESocketServerStatus.ReconnectAttempt) && _idRunKeepAlive == id)
-                    Status = ESocketServerStatus.Dead;
+                if ((Status == EServerSessionStatus.BypassToReconnect || Status == EServerSessionStatus.ReconnectAttempt) && _idRunKeepAlive == id)
+                    Status = EServerSessionStatus.Dead;
                 else
                     return;
             }

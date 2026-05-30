@@ -4,22 +4,29 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
-using static EnjoySockets.ETCPControlSendingClient;
+using static EnjoySockets.ClientSendFlowController;
 
 namespace EnjoySockets
 {
-    public enum ESocketClientStatus
+    public enum EClientStatus
     {
         Connected, ReconnectAttempt, Disconnected
     }
 
-    public class EUserClient : EUser<ESocketResourceClient>
+    /// <summary>
+    /// Represents the client-side session over a reusable socket resource.
+    /// </summary>
+    /// <remarks>
+    /// This class is designed to be reused for the entire lifetime of the application.
+    /// It is not disposed after a single connection lifecycle and does not follow a per-connection disposal model.
+    /// </remarks>
+    public class EClient : ESession<ESocketResourceClient>
     {
         /// <summary>
         /// Represents the current status of the socket client.
         /// </summary>
         /// <remarks>
-        /// Possible values of <see cref="ESocketClientStatus"/>:
+        /// Possible values of <see cref="EClientStatus"/>:
         /// <list type="bullet">
         ///   <item><description><c>Connected</c> - the client is actively connected to the server.</description></item>
         ///   <item><description><c>ReconnectAttempt</c> - the client is attempting to reconnect.</description></item>
@@ -28,14 +35,14 @@ namespace EnjoySockets
         /// Regardless of the current status, the client object is reusable.
         /// Do not create new client instances unnecessarily; reuse existing ones whenever possible.
         /// </remarks>
-        public ESocketClientStatus Status { get; private set; } = ESocketClientStatus.Disconnected;
+        public EClientStatus Status { get; private set; } = EClientStatus.Disconnected;
         public EAddress? Address { get; set; }
 
         int _reconnectDelayMs = 0;
-        readonly ETCPControlSendingClient _controlSending;
+        readonly ClientSendFlowController _controlSending;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="EUserClient"/> class
+        /// Initializes a new instance of the <see cref="EClient"/> class
         /// using the specified RSA provider and default client configuration.
         /// </summary>
         /// <param name="ersa">RSA provider used for encryption and signing.</param>
@@ -44,10 +51,10 @@ namespace EnjoySockets
         /// Do not create new instances unnecessarily - the same object can be
         /// reconnected and reused multiple times.
         /// </remarks>
-        public EUserClient(ERSA ersa) : this(ersa, new()) { }
+        public EClient(ERSA ersa) : this(ersa, new()) { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="EUserClient"/> class
+        /// Initializes a new instance of the <see cref="EClient"/> class
         /// using the specified RSA provider and client configuration.
         /// </summary>
         /// <param name="ersa">RSA provider used for encryption and signing.</param>
@@ -57,9 +64,9 @@ namespace EnjoySockets
         /// It is recommended to reuse existing instances instead of creating
         /// new ones for each connection attempt.
         /// </remarks>
-        public EUserClient(ERSA ersa, ETCPClientConfig config) : base(new ESocketResourceClient(config, ersa))
+        public EClient(ERSA ersa, EClientConfig config) : base(new ESocketResourceClient(config, ersa))
         {
-            EReceiveCells.Initialize();
+            DispatcherRegistry.Initialize();
             if (SocketResource != null)
             {
                 SocketResource.UserObj = this;
@@ -143,7 +150,7 @@ namespace EnjoySockets
             if (SocketResource?.BasicSocket == null)
                 return ETransactResult.ExecutionFailed;
 
-            var t = EReceiveCells.GetUlongToSend(target);
+            var t = DispatcherRegistry.GetUlongToSend(target);
             if (t < 1) return ETransactResult.ExecutionFailed;
 
             var segments = SocketResource.ObjToSegments(obj);
@@ -159,7 +166,7 @@ namespace EnjoySockets
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
             length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
-            EControlSendingWaiter? ecsw;
+            ClientSendPermit? ecsw;
             if ((ecsw = _controlSending.TryWait(length)) == null)
                 ecsw = await _controlSending.Wait(length);
 
@@ -179,11 +186,11 @@ namespace EnjoySockets
                 return ETransactResult.ExecutionFailed;
             }
 
-            var objMsg = SocketResource.ChannelSend.MsgPool.Rent();
+            var objMsg = SocketResource.ExecutorSend._messagePool.Rent();
             objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
             objMsg.Session = session;
 
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(objMsg);
+            var vt = SocketResource.ExecutorSend.TrySendMsgAndGetSession(objMsg);
             if (!vt.IsCompletedSuccessfully)
                 await vt;
 
@@ -195,10 +202,10 @@ namespace EnjoySockets
 
         public async override sealed ValueTask<bool> Send<T>(long instance, string target, T? obj) where T : default
         {
-            if (SocketResource?.BasicSocket == null || Status != ESocketClientStatus.Connected)
+            if (SocketResource?.BasicSocket == null || Status != EClientStatus.Connected)
                 return false;
 
-            var t = EReceiveCells.GetUlongToSend(target);
+            var t = DispatcherRegistry.GetUlongToSend(target);
             if (t < 1)
                 return false;
 
@@ -214,7 +221,7 @@ namespace EnjoySockets
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
             length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
-            EControlSendingWaiter? ecsw;
+            ClientSendPermit? ecsw;
             if ((ecsw = _controlSending.TryWait(length)) == null)
                 ecsw = await _controlSending.Wait(length);
 
@@ -235,12 +242,12 @@ namespace EnjoySockets
                 return false;
             }
 
-            var objMsg = SocketResource.ChannelSend.MsgPool.Rent();
+            var objMsg = SocketResource.ExecutorSend._messagePool.Rent();
             objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
             objMsg.Session = session;
 
             var success = false;
-            var vt = SocketResource.ChannelSend.TrySendMsgAndGetSession(objMsg);
+            var vt = SocketResource.ExecutorSend.TrySendMsgAndGetSession(objMsg);
             if (vt.IsCompletedSuccessfully)
                 success = vt.Result > 0;
             else
@@ -259,7 +266,7 @@ namespace EnjoySockets
             return true;
         }
 
-        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, EControlSendingWaiter ecsw, ESender sender)
+        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, ClientSendPermit ecsw, ClientReliableSendContext sender)
         {
             await sender.AsValueTask();
             sr.MsgCache.Remove(session);
@@ -596,7 +603,7 @@ namespace EnjoySockets
             if (SocketResource?.BasicSocket == null)
                 return ValueTask.FromResult(false);
 
-            return SocketResource.ChannelSend.TrySendHeartbeat(SocketResource.RunHeartbeatSend);
+            return SocketResource.ExecutorSend.TrySendHeartbeat(SocketResource.RunHeartbeatSend);
         }
 
         CancellationTokenSource? _heartbeatCts;
@@ -653,13 +660,13 @@ namespace EnjoySockets
         {
             if (base.Start())
             {
-                ESocketClientStatus status = ESocketClientStatus.Connected;
+                EClientStatus status = EClientStatus.Connected;
                 lock (_lock)
                 {
                     status = Status;
-                    Status = ESocketClientStatus.Connected;
+                    Status = EClientStatus.Connected;
                 }
-                if (status == ESocketClientStatus.Disconnected)
+                if (status == EClientStatus.Disconnected)
                     OnConnected();
                 else
                     _ = StartRebuildSessions();
@@ -675,14 +682,14 @@ namespace EnjoySockets
 
         void Dispose()
         {
-            if (EReceiveArgs.IsSoftClose(SocketResource))
+            if (SocketReceiveContext.IsSoftClose(SocketResource))
                 Disconnect();
             else
             {
                 if (_reconnectDelayMs > 0)
                 {
                     lock (_lock)
-                        Status = ESocketClientStatus.ReconnectAttempt;
+                        Status = EClientStatus.ReconnectAttempt;
 
                     _ = StartReconnect();
                 }
@@ -708,20 +715,20 @@ namespace EnjoySockets
         /// </summary>
         public void Disconnect()
         {
-            ESocketClientStatus status;
+            EClientStatus status;
             lock (_lock)
             {
-                status = ESocketClientStatus.Connected;
-                if (Status != ESocketClientStatus.Disconnected)
+                status = EClientStatus.Connected;
+                if (Status != EClientStatus.Disconnected)
                 {
-                    Status = ESocketClientStatus.Disconnected;
+                    Status = EClientStatus.Disconnected;
                     _reconnectDelayMs = 0;
                     status = Status;
                     UserId = SetGuidUserId();
                     SocketResource?.Dispose();
                 }
             }
-            if (status == ESocketClientStatus.Disconnected)
+            if (status == EClientStatus.Disconnected)
             {
                 HeartbeatStop();
                 _controlSending.CancelAll();

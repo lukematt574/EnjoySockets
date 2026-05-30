@@ -21,7 +21,7 @@ namespace EnjoySockets
     /// </summary>
     public class ERSA
     {
-        public static ReadOnlyMemory<byte> HandshakeHeader { get; private set; }
+        public static ReadOnlyMemory<byte> HandshakeHeader { get; }
         static byte[] _handshakeHeader { get; set; }
 
         static ERSA()

@@ -4,30 +4,30 @@ using System.Collections.Concurrent;
 
 namespace EnjoySockets
 {
-    internal class EReceiveMsgPool
+    internal class MessageReceiveOperationPool
     {
-        readonly ConcurrentStack<EReceiveMsg> _pool = new();
+        readonly ConcurrentStack<MessageReceiveOperation> _pool = new();
 
-        internal EReceiveMsg Rent() => _pool.TryPop(out var s) ? s : new EReceiveMsg(this);
-        internal void Return(EReceiveMsg message) => _pool.Push(message);
+        internal MessageReceiveOperation Rent() => _pool.TryPop(out var operation) ? operation : new MessageReceiveOperation(this);
+        internal void Return(MessageReceiveOperation operation) => _pool.Push(operation);
     }
 
-    internal class EReceiveMsg : EReceiveData
+    internal class MessageReceiveOperation : DataReceiveOperation
     {
         internal int WroteBytes { get; private set; }
 
-        EMemorySegment? _pipeSegments;
-        EReceiveMsgPool _pool;
+        MemorySegment? _pipeSegments;
+        MessageReceiveOperationPool _pool;
 
-        internal EReceiveMsg(EReceiveMsgPool pool)
+        internal MessageReceiveOperation(MessageReceiveOperationPool pool)
         {
             _pool = pool;
-            Form = EDataForm.Msg;
+            Form = DataForm.Msg;
         }
 
-        internal static EReceiveMsg? Get(object? userObj, ESocketResource eUser, EBufferControl? buffer, ReadOnlySpan<byte> part, ERCell rCell)
+        internal static MessageReceiveOperation? Get(object? userObj, ESocketResource eUser, ServerBufferQuota? buffer, ReadOnlySpan<byte> part, DispatchHandler dHandler)
         {
-            if (rCell.SocketType == eUser.SocketType)
+            if (dHandler.SocketRole == eUser.SocketRole)
             {
                 var rentBytes = 0;
                 if (buffer != null)
@@ -39,11 +39,11 @@ namespace EnjoySockets
                 }
 
                 var instanceId = ESocketResource.ReadInstance(part);
-                if (!eUser.TryGetInstance(rCell, instanceId, out object? instance))
+                if (!eUser.TryGetInstance(dHandler, instanceId, out object? instance))
                     return null;
 
                 var eMsg = eUser.ReceiveMsgPool.Rent();
-                eMsg.Initialize(userObj, rCell, buffer, instance, rentBytes, eUser);
+                eMsg.Initialize(userObj, dHandler, buffer, instance, rentBytes, eUser);
                 eMsg.SetBasicData(part, instanceId);
                 eMsg.WroteBytes = 0;
                 return eMsg;
@@ -58,24 +58,24 @@ namespace EnjoySockets
         /// 0 - completed
         /// 1 - need more data
         /// 2 - buffer full (unable to rent memory [only server socket])
-        /// 3 - invalid arguments (null Cell/BufferControl, empty data, or deserialization failure)
+        /// 3 - invalid arguments (null Handler/BufferControl, empty data, or deserialization failure)
         /// </returns>
-        internal sealed override int TryPushPart(ReadOnlySpan<byte> part, EMemorySegmentPool segmentPool, IESerializer serializer)
+        internal sealed override int TryPushPart(ReadOnlySpan<byte> part, MemorySegmentPool segmentPool, IESerializer serializer)
         {
-            if (Cell == null)
+            if (Handler == null)
                 return 3;
 
             var payloadLength = ESocketResource.ReadPayloadLength(part);
             if (payloadLength < 1)
             {
-                bool isComplete = payloadLength == TotalBytes && Cell.ArgAllowNull;
+                bool isComplete = payloadLength == TotalBytes && Handler.ArgAllowNull;
                 return isComplete ? 0 : 3;
             }
 
             var payload = ESocketResource.ReadPayload(part);
             if (payloadLength >= TotalBytes)
             {
-                bool success = Cell.Deserialize(payload, ref FinalArg, serializer);
+                bool success = Handler.Deserialize(payload, ref FinalArg, serializer);
                 return success ? 0 : 3;
             }
 
@@ -83,8 +83,8 @@ namespace EnjoySockets
                 _pipeSegments = segmentPool.Rent();
             else
             {
-                if (BufferControl != null)
-                    if (!BufferControl.TryRent(payloadLength))
+                if (_serverBufferQuota != null)
+                    if (!_serverBufferQuota.TryRent(payloadLength))
                         return 2;
                 _rentBytes += payloadLength;
             }
@@ -94,7 +94,7 @@ namespace EnjoySockets
 
             if (WroteBytes >= TotalBytes)
             {
-                FinalArg = Cell.Deserialize(_pipeSegments.Read(), serializer);
+                FinalArg = Handler.Deserialize(_pipeSegments.Read(), serializer);
                 ClearPipeSegments();
                 return 0;
             }
@@ -104,10 +104,10 @@ namespace EnjoySockets
 
         internal sealed override object?[]? GetArgs()
         {
-            if (Cell == null)
+            if (Handler == null)
                 return null;
 
-            if (Cell.ArgType != null)
+            if (Handler.ArgType != null)
             {
                 _tab2Params[0] = User;
                 _tab2Params[1] = FinalArg;

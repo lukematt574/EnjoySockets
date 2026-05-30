@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 namespace EnjoySockets
 {
     /// <summary>
-    /// Transact result for 'SendTransact' method on client side
+    /// Transact result for 'SendTransact' method in <see cref="EClient"/>
     /// </summary>
     public readonly record struct ETransactResult(long Code)
     {
@@ -23,7 +23,7 @@ namespace EnjoySockets
         /// Buffer is full and required memory could not be allocated.
         /// </summary>
         /// <remarks>
-        /// Returned when <see cref="ETCPConfig.MessageBuffer"/> reaches its maximum capacity.
+        /// Returned when <see cref="EConfig.MessageBuffer"/> reaches its maximum capacity.
         /// Normally this condition is prevented by the client-side buffering logic.
         /// </remarks>
         public static readonly ETransactResult BufferFull = new(-2);
@@ -59,12 +59,12 @@ namespace EnjoySockets
         /// <summary>
         /// Indicates whether the result is a custom application-defined code within the valid custom range (1 .. 1_000_000).
         /// </summary>
-        public bool IsCustomCode => Code > 0 && Code <= EUserServer.MinUniqueId;
+        public bool IsCustomCode => Code > 0 && Code <= EServerSession.MinUniqueId;
 
         /// <summary>
         /// Indicates whether the result represents a server-generated entity identifier (Code &gt; 1_000_000).
         /// </summary>
-        public bool IsEntityId => Code > EUserServer.MinUniqueId;
+        public bool IsEntityId => Code > EServerSession.MinUniqueId;
 
         public override string ToString()
             => Code switch
@@ -75,8 +75,8 @@ namespace EnjoySockets
                 -3 => nameof(SessionExpired),
                 -4 => nameof(AccessDenied),
                 -5 => nameof(InvalidPayload),
-                > 0 when Code <= EUserServer.MinUniqueId => $"Custom({Code})",
-                > EUserServer.MinUniqueId => $"EntityId({Code})",
+                > 0 when Code <= EServerSession.MinUniqueId => $"Custom({Code})",
+                > EServerSession.MinUniqueId => $"EntityId({Code})",
                 _ => $"Unknown({Code})"
             };
 

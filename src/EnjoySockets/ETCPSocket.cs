@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 
 namespace EnjoySockets
 {
-    public enum ETCPSocketType
+    public enum ESocketRole
     {
         Server, Client
     }
@@ -22,39 +22,39 @@ namespace EnjoySockets
 
         public const int MaxPacketSizeConnect = 1330;
 
-        public const int MaxCachedResponses = 50;
+        public const int MaxServerStoredResponsesPerSession = 50;
         public const int MinBufferSlotSizeBytes = 30;
 
         #region Receive methods
 
-        internal static async ValueTask<ReadOnlyMemory<byte>> Receive(Socket socket, EReceiveArgs args)
+        internal static async ValueTask<ReadOnlyMemory<byte>> Receive(Socket socket, SocketReceiveContext context)
         {
-            args.StartPrepare(PacketPrefixLength);
-            if (await ReadAsync(socket, args))
+            context.StartPrepare(PacketPrefixLength);
+            if (await ReadAsync(socket, context))
             {
-                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(args.GetSaveBytesSpan());
+                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(context.GetSaveBytesSpan());
                 if (dataLength <= 0 || dataLength > MaxPacketSizeConnect)
                     return Memory<byte>.Empty;
 
-                args.StartPrepare(dataLength);
-                if (await ReadAsync(socket, args))
-                    return args.GetSaveBytes();
+                context.StartPrepare(dataLength);
+                if (await ReadAsync(socket, context))
+                    return context.GetSaveBytes();
             }
             return Memory<byte>.Empty;
         }
 
-        internal static async ValueTask<ReadOnlyMemory<byte>> Receive(Socket socket, EAesGcm aes, EReceiveArgs args)
+        internal static async ValueTask<ReadOnlyMemory<byte>> Receive(Socket socket, EAesGcm aes, SocketReceiveContext context)
         {
-            args.StartPrepare(2);
-            if (await ReadAsync(socket, args))
+            context.StartPrepare(2);
+            if (await ReadAsync(socket, context))
             {
-                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(args.GetSaveBytesSpan());
+                var dataLength = BinaryPrimitives.ReadUInt16LittleEndian(context.GetSaveBytesSpan());
                 if (dataLength <= PacketEncryptHeader || dataLength > MaxPacketSizeConnect)
                     return Memory<byte>.Empty;
 
-                args.StartPrepare(dataLength);
-                if (await ReadAsync(socket, args))
-                    return args.GetSaveBytes(aes);
+                context.StartPrepare(dataLength);
+                if (await ReadAsync(socket, context))
+                    return context.GetSaveBytes(aes);
             }
             return Memory<byte>.Empty;
         }
@@ -68,17 +68,17 @@ namespace EnjoySockets
                 return rT.Result;
         }
 
-        internal static int TryRead(Socket socket, EReceiveArgs args, int toRead)
+        internal static int TryRead(Socket socket, SocketReceiveContext context, int toRead)
         {
-            args.StartPrepare(toRead);
+            context.StartPrepare(toRead);
             int totalRead = 0;
-            while (totalRead < args.MaxLengthArray)
+            while (totalRead < context.TotalLength)
             {
-                args.PrepareBuffer();
+                context.PrepareBuffer();
                 bool pending;
                 try
                 {
-                    pending = socket.ReceiveAsync(args.SAEA);
+                    pending = socket.ReceiveAsync(context.SAEA);
                 }
                 catch
                 {
@@ -87,17 +87,17 @@ namespace EnjoySockets
 
                 if (!pending)
                 {
-                    int bytesRead = args.SAEA.BytesTransferred;
+                    int bytesRead = context.SAEA.BytesTransferred;
 
                     if (bytesRead <= 0)
                         return -1;
 
                     totalRead += bytesRead;
 
-                    if (totalRead == args.MaxLengthArray)
+                    if (totalRead == context.TotalLength)
                         return totalRead;
 
-                    args.AddOffset(bytesRead);
+                    context.AddOffset(bytesRead);
                 }
                 else
                     return totalRead;
@@ -105,29 +105,29 @@ namespace EnjoySockets
             return totalRead;
         }
 
-        internal static async ValueTask<bool> ReadContinueAsync(Socket socket, EReceiveArgs args, int read)
+        internal static async ValueTask<bool> ReadContinueAsync(Socket socket, SocketReceiveContext context, int read)
         {
             int totalRead = read;
 
-            int bytesRead = await args.WaitForCompletionAsync();
+            int bytesRead = await context.WaitForCompletionAsync();
 
             if (bytesRead <= 0)
                 return false;
 
             totalRead += bytesRead;
 
-            if (totalRead == args.MaxLengthArray)
+            if (totalRead == context.TotalLength)
                 return true;
 
-            args.AddOffset(bytesRead);
+            context.AddOffset(bytesRead);
 
-            while (totalRead < args.MaxLengthArray)
+            while (totalRead < context.TotalLength)
             {
-                args.PrepareBuffer();
+                context.PrepareBuffer();
                 bool pending;
                 try
                 {
-                    pending = socket.ReceiveAsync(args.SAEA);
+                    pending = socket.ReceiveAsync(context.SAEA);
                 }
                 catch
                 {
@@ -135,32 +135,32 @@ namespace EnjoySockets
                 }
 
                 bytesRead = pending
-                    ? await args.WaitForCompletionAsync()
-                    : args.SAEA.BytesTransferred;
+                    ? await context.WaitForCompletionAsync()
+                    : context.SAEA.BytesTransferred;
 
                 if (bytesRead <= 0)
                     return false;
 
                 totalRead += bytesRead;
 
-                if (totalRead == args.MaxLengthArray)
+                if (totalRead == context.TotalLength)
                     return true;
 
-                args.AddOffset(bytesRead);
+                context.AddOffset(bytesRead);
             }
             return true;
         }
 
-        internal static async ValueTask<bool> ReadAsync(Socket socket, EReceiveArgs args)
+        internal static async ValueTask<bool> ReadAsync(Socket socket, SocketReceiveContext context)
         {
             int totalRead = 0;
-            while (totalRead < args.MaxLengthArray)
+            while (totalRead < context.TotalLength)
             {
-                args.PrepareBuffer();
+                context.PrepareBuffer();
                 bool pending;
                 try
                 {
-                    pending = socket.ReceiveAsync(args.SAEA);
+                    pending = socket.ReceiveAsync(context.SAEA);
                 }
                 catch
                 {
@@ -168,18 +168,18 @@ namespace EnjoySockets
                 }
 
                 int bytesRead = pending
-                    ? await args.WaitForCompletionAsync()
-                    : args.SAEA.BytesTransferred;
+                    ? await context.WaitForCompletionAsync()
+                    : context.SAEA.BytesTransferred;
 
                 if (bytesRead <= 0)
                     return false;
 
                 totalRead += bytesRead;
 
-                if (totalRead == args.MaxLengthArray)
+                if (totalRead == context.TotalLength)
                     return true;
 
-                args.AddOffset(bytesRead);
+                context.AddOffset(bytesRead);
             }
             return true;
         }
@@ -224,36 +224,36 @@ namespace EnjoySockets
             return Write(socket, data);
         }
 
-        internal static ValueTask<bool> Send(Socket? socket, ESendArgs args, ReadOnlyMemory<byte> data)
+        internal static ValueTask<bool> Send(Socket? socket, SocketSendContext context, ReadOnlyMemory<byte> data)
         {
-            if (socket == null || !args.SetToSend(data))
+            if (socket == null || !context.SetToSend(data))
                 return ValueTask.FromResult(false);
 
-            return Write(socket, args);
+            return Write(socket, context);
         }
 
-        internal static ValueTask<bool> Send(Socket? socket, ESendArgs args, EAesGcm aes, ReadOnlyMemory<byte> data)
+        internal static ValueTask<bool> Send(Socket? socket, SocketSendContext context, EAesGcm aes, ReadOnlyMemory<byte> data)
         {
-            if (socket == null || !args.SetToSend(data.Span, aes))
+            if (socket == null || !context.SetToSend(data.Span, aes))
                 return ValueTask.FromResult(false);
 
-            return Write(socket, args);
+            return Write(socket, context);
         }
 
-        internal static ValueTask<bool> Write(Socket? socket, ESendArgs args)
+        internal static ValueTask<bool> Write(Socket? socket, SocketSendContext context)
         {
             if (socket == null)
                 return ValueTask.FromResult(false);
 
             int sentSoFar = 0;
-            while (sentSoFar < args.MaxLengthArray)
+            while (sentSoFar < context.TotalLength)
             {
-                args.Prepare();
+                context.Prepare();
 
                 bool willRaiseEvent;
                 try
                 {
-                    willRaiseEvent = socket.SendAsync(args.SAEA);
+                    willRaiseEvent = socket.SendAsync(context.SAEA);
                 }
                 catch
                 {
@@ -262,44 +262,44 @@ namespace EnjoySockets
 
                 if (!willRaiseEvent)
                 {
-                    int bytesSent = args.SAEA.BytesTransferred;
+                    int bytesSent = context.SAEA.BytesTransferred;
                     if (bytesSent <= 0)
                         return ValueTask.FromResult(false);
 
                     sentSoFar += bytesSent;
 
-                    if (sentSoFar == args.MaxLengthArray)
+                    if (sentSoFar == context.TotalLength)
                         return ValueTask.FromResult(true);
 
-                    args.AddOffset(bytesSent);
+                    context.AddOffset(bytesSent);
                     continue;
                 }
-                return WriteAsync(socket, args, sentSoFar);
+                return WriteAsync(socket, context, sentSoFar);
             }
-            return ValueTask.FromResult(sentSoFar == args.MaxLengthArray);
+            return ValueTask.FromResult(sentSoFar == context.TotalLength);
         }
 
-        static async ValueTask<bool> WriteAsync(Socket socket, ESendArgs args, int sentSoFar)
+        static async ValueTask<bool> WriteAsync(Socket socket, SocketSendContext context, int sentSoFar)
         {
-            int bytesSent = await args.WaitForCompletionAsync();
+            int bytesSent = await context.WaitForCompletionAsync();
             if (bytesSent <= 0)
                 return false;
 
             sentSoFar += bytesSent;
 
-            if (sentSoFar == args.MaxLengthArray)
+            if (sentSoFar == context.TotalLength)
                 return true;
 
-            args.AddOffset(bytesSent);
+            context.AddOffset(bytesSent);
 
-            while (sentSoFar < args.MaxLengthArray)
+            while (sentSoFar < context.TotalLength)
             {
-                args.Prepare();
+                context.Prepare();
 
                 bool willRaiseEvent;
                 try
                 {
-                    willRaiseEvent = socket.SendAsync(args.SAEA);
+                    willRaiseEvent = socket.SendAsync(context.SAEA);
                 }
                 catch
                 {
@@ -307,21 +307,21 @@ namespace EnjoySockets
                 }
 
                 if (!willRaiseEvent)
-                    bytesSent = args.SAEA.BytesTransferred;
+                    bytesSent = context.SAEA.BytesTransferred;
                 else
-                    bytesSent = await args.WaitForCompletionAsync();
+                    bytesSent = await context.WaitForCompletionAsync();
 
                 if (bytesSent <= 0)
                     return false;
 
                 sentSoFar += bytesSent;
 
-                if (sentSoFar == args.MaxLengthArray)
+                if (sentSoFar == context.TotalLength)
                     return true;
 
-                args.AddOffset(bytesSent);
+                context.AddOffset(bytesSent);
             }
-            return sentSoFar == args.MaxLengthArray;
+            return sentSoFar == context.TotalLength;
         }
 
         static async ValueTask<bool> Write(Socket socket, ReadOnlyMemory<byte> data)

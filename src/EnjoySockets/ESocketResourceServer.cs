@@ -4,18 +4,18 @@ namespace EnjoySockets
 {
     public class ESocketResourceServer : ESocketResource
     {
-        private protected EBufferControl BufferToReceiveMsg;
+        private protected ServerBufferQuota BufferToReceiveMsg;
 
-        internal ETCPServerConfig ConfigServer { get; private set; }
+        internal EServerConfig ConfigServer { get; }
 
-        internal int KeepAlive { get; private set; }
+        internal int KeepAlive { get; }
         internal bool FirstConnect { get; set; } = true;
 
-        EResponseCache ResponseCache { get; set; } = new(ETCPSocket.MaxCachedResponses);
+        ServerSessionResponseStore ResponseStore { get; set; } = new(ETCPSocket.MaxServerStoredResponsesPerSession);
 
         internal Func<long, bool>? CheckAccessEvent { get; set; }
 
-        internal ESocketResourceServer(ETCPServerConfig config, ERSA ersa) : base(ETCPSocketType.Server, config, ersa)
+        internal ESocketResourceServer(EServerConfig config, ERSA ersa) : base(ESocketRole.Server, config, ersa)
         {
             ConfigServer = config.Clone();
             KeepAlive = ConfigServer.KeepAlive * 1000;
@@ -76,36 +76,36 @@ namespace EnjoySockets
             return token.SequenceEqual(TokenToReconnect);
         }
 
-        private protected sealed override ERCell? GetReceiveCell(ReadOnlySpan<byte> dto)
+        private protected sealed override DispatchHandler? GetReceiveHandler(ReadOnlySpan<byte> dto)
         {
             var session = ReadSession(dto);
             if (ReadTotalBytes(dto) > MessageBuffer)
             {
-                SendSpecialWithCache(session, 4, null);
+                SendSpecialWithStore(session, 4, null);
                 return null;
             }
 
             var instance = ReadInstance(dto);
             var target = ReadTarget(dto);
-            ERCell? rCell = null;
+            DispatchHandler? dHandler = null;
             if (instance > 0)
             {
                 lock (_Lock)
                 {
-                    if (_privateInstances.TryGetValue(instance, out (object, Dictionary<ulong, ERCell>) val))
-                        rCell = EReceiveCells.GetCellToInstanceId(val.Item1, target);
+                    if (_privateInstances.TryGetValue(instance, out (object, Dictionary<ulong, DispatchHandler>) val))
+                        dHandler = DispatcherRegistry.GetHandlerToInstanceId(val.Item1, target);
                 }
             }
             else
-                rCell = EReceiveCells.GetCellToBasic(target);
+                dHandler = DispatcherRegistry.GetHandlerToBasic(target);
 
-            if (rCell == null)
+            if (dHandler == null)
             {
-                SendSpecialWithCache(session, 6, null);
+                SendSpecialWithStore(session, 6, null);
                 return null;
             }
 
-            return rCell;
+            return dHandler;
         }
 
         /// <summary>
@@ -117,7 +117,7 @@ namespace EnjoySockets
         /// </param>
         private protected void ClearReceiveDataSessions(ulong session)
         {
-            List<EReceiveMsg> sessionsToRemove;
+            List<MessageReceiveOperation> sessionsToRemove;
             lock (_Lock)
             {
                 sessionsToRemove = ReceiveDataSessions
@@ -134,25 +134,25 @@ namespace EnjoySockets
 
         private protected override void ClearReceiveDataSessions() { }
 
-        private protected sealed override void RunReceiveMsg(ERCell rCell, ReadOnlySpan<byte> dto, ulong session)
+        private protected sealed override void RunReceiveMsg(DispatchHandler dHandler, ReadOnlySpan<byte> dto, ulong session)
         {
-            if (rCell.AttrMethod.MaxParamSize != 0 && ReadTotalBytes(dto) > rCell.AttrMethod.MaxParamSize)
+            if (dHandler.MethodAttr.MaxParamSize != 0 && ReadTotalBytes(dto) > dHandler.MethodAttr.MaxParamSize)
             {
-                SendSpecialWithCache(session, 4, null);
+                SendSpecialWithStore(session, 4, null);
                 return;
             }
 
-            var access = rCell.AttrMethod.Access;
+            var access = dHandler.MethodAttr.Access;
             if (access != 0)
             {
                 if (!(CheckAccessEvent?.Invoke(access) ?? false))
                 {
-                    SendSpecialWithCache(session, 5, null);
+                    SendSpecialWithStore(session, 5, null);
                     return;
                 }
             }
 
-            var msg = EReceiveMsg.Get(UserObj, this, BufferToReceiveMsg, dto, rCell);
+            var msg = MessageReceiveOperation.Get(UserObj, this, BufferToReceiveMsg, dto, dHandler);
             if (msg != null)
             {
                 bool added = false;
@@ -163,7 +163,7 @@ namespace EnjoySockets
                 }
                 if (!added)
                 {
-                    SendSpecialWithCache(msg.Session, 6, null);
+                    SendSpecialWithStore(msg.Session, 6, null);
                     msg.Dispose();
                 }
                 else
@@ -171,11 +171,11 @@ namespace EnjoySockets
             }
             else
             {
-                SendSpecialWithCache(session, 6, null);
+                SendSpecialWithStore(session, 6, null);
             }
         }
 
-        private protected sealed override void RunReceiveMsg(EReceiveData eData, ReadOnlySpan<byte> dto)
+        private protected sealed override void RunReceiveMsg(DataReceiveOperation eData, ReadOnlySpan<byte> dto)
         {
             var result = TryPushReceiveDTO(eData, dto);
             if (result > 1)//over 1 - error
@@ -211,14 +211,14 @@ namespace EnjoySockets
             long? msg = null;
             lock (_Lock)
             {
-                if (ResponseCache.TryGet(session, out var result))
+                if (ResponseStore.TryGet(session, out var result))
                 {
                     typeMsg = result.Item1;
                     msg = result.Item2;
                 }
                 else
                 {
-                    if (ReceiveDataSessions.TryGetValue(session, out EReceiveMsg? rMsg))
+                    if (ReceiveDataSessions.TryGetValue(session, out MessageReceiveOperation? rMsg))
                     {
                         if (!rMsg.InChannel)
                         {
@@ -241,18 +241,18 @@ namespace EnjoySockets
             SendSpecial(session, typeMsg, msg);
         }
 
-        internal override sealed void DisposeReceiveDataFromChannel(EReceiveData? eData)
+        internal override sealed void DisposeReceiveDataFromChannel(DataReceiveOperation? eData)
         {
             if (eData != null)
                 RunDisposeReceiveData(eData, 1);
         }
 
-        void RunDisposeReceiveData(EReceiveData eData, ulong typeMsg)
+        void RunDisposeReceiveData(DataReceiveOperation eData, ulong typeMsg)
         {
             lock (_Lock)
             {
                 ReceiveDataSessions.Remove(eData.Session, out _);
-                ResponseCache.Add(eData.Session, typeMsg, eData.Response);
+                ResponseStore.Store(eData.Session, typeMsg, eData.Response);
             }
             SendSpecial(eData.Session, typeMsg, eData.Response);
             if (eData.CorruptedArg)
@@ -260,15 +260,15 @@ namespace EnjoySockets
             eData.Dispose();
         }
 
-        internal ValueTask<bool> SendSpecialWithCache(ulong session, ulong typeMsg, long? msg)
+        internal ValueTask<bool> SendSpecialWithStore(ulong session, ulong typeMsg, long? msg)
         {
             lock (_Lock)
-                ResponseCache.Add(session, typeMsg, msg);
+                ResponseStore.Store(session, typeMsg, msg);
             return SendSpecial(session, typeMsg, msg);
         }
 
         int _maxSendSpecialCount;
-        const int _limitSendSpecial = ETCPSocket.MaxCachedResponses * 2;
+        const int _limitSendSpecial = ETCPSocket.MaxServerStoredResponsesPerSession * 2;
         internal override sealed ValueTask<bool> SendSpecial(ulong session, ulong typeMsg, long? msg)
         {
             if (BasicSocket == null)
@@ -282,7 +282,7 @@ namespace EnjoySockets
                 return ValueTask.FromResult(false);
             }
 
-            var vt = ChannelSend.TrySendSpecial(RunSpecialSend, session, typeMsg, msg);
+            var vt = ExecutorSend.TrySendSpecial(RunSpecialSend, session, typeMsg, msg);
             if (vt.IsCompletedSuccessfully)
             {
                 Interlocked.Decrement(ref _maxSendSpecialCount);
@@ -312,7 +312,7 @@ namespace EnjoySockets
 
         private protected sealed override void DisposeReceiveDataSessions()
         {
-            var listToRemove = new List<EReceiveMsg>();
+            var listToRemove = new List<MessageReceiveOperation>();
             lock (_Lock)
             {
                 foreach (var item in ReceiveDataSessions.Values)
@@ -329,11 +329,11 @@ namespace EnjoySockets
                 item.Dispose();
         }
 
-        internal void ClearResponseCache()
+        internal void ClearResponseStore()
         {
             _maxSendSpecialCount = 0;
             lock (_Lock)
-                ResponseCache.Clear();
+                ResponseStore.Clear();
         }
     }
 }
