@@ -22,7 +22,6 @@ namespace EnjoySockets
         internal MessageReceiveOperation(MessageReceiveOperationPool pool)
         {
             _pool = pool;
-            Form = DataForm.Msg;
         }
 
         internal static MessageReceiveOperation? Get(object? userObj, ESocketResource eUser, ServerBufferQuota? buffer, ReadOnlySpan<byte> part, DispatchHandler dHandler)

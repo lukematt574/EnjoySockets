@@ -16,12 +16,22 @@ namespace EnjoySockets
         internal int TotalBytes { get; set; }
         internal MemorySegment? Msg { get; set; }
         internal bool IsRetryable { get; set; }
+        internal MemorySegment? ResponseMsg { get; set; }
 
         ManualResetValueTaskSourceCore<long> _core;
 
         internal ClientReliableSendContext()
         {
             _core = new ManualResetValueTaskSourceCore<long> { RunContinuationsAsynchronously = true };
+        }
+
+        internal T? GetResponseMsg<T>(IESerializer serializer)
+        {
+            if (ResponseMsg != null)
+            {
+                return serializer.Deserialize<T>(ResponseMsg.Read());
+            }
+            return default;
         }
 
         internal void Reset()

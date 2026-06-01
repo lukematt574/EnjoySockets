@@ -34,11 +34,11 @@ namespace EnjoySockets
         int CurrentSegmentIndex;
         int ToWrite;
 
-        internal void RunPrepare(Func<MessageSendOperation, ValueTask<bool>> _task, ulong target, MemorySegment? firstSegment, long instance)
+        internal void RunPrepare(Func<MessageSendOperation, ValueTask<bool>> _task, ulong target, MemorySegment? firstSegment, long instance, ulong session = 0)
         {
             Func = _task;
             Target = target;
-            Session = 0;
+            Session = session;
             Instance = instance;
             CurrentSegment = firstSegment;
             CurrentSegmentIndex = 0;

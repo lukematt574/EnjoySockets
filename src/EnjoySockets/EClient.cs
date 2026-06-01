@@ -39,7 +39,7 @@ namespace EnjoySockets
         public EAddress? Address { get; set; }
 
         int _reconnectDelayMs = 0;
-        readonly ClientSendFlowController _controlSending;
+        readonly ClientSendFlowController _sendFlowController;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="EClient"/> class
@@ -48,21 +48,18 @@ namespace EnjoySockets
         /// <param name="ersa">RSA provider used for encryption and signing.</param>
         /// <remarks>
         /// The client instance is reusable regardless of its connection status.
-        /// Do not create new instances unnecessarily - the same object can be
-        /// reconnected and reused multiple times.
+        /// Do not create new instances unnecessarily - the same object can be reconnected and reused multiple times.
         /// </remarks>
         public EClient(ERSA ersa) : this(ersa, new()) { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="EClient"/> class
-        /// using the specified RSA provider and client configuration.
+        /// Initializes a new instance of the <see cref="EClient"/> class using the specified RSA provider and client configuration.
         /// </summary>
         /// <param name="ersa">RSA provider used for encryption and signing.</param>
         /// <param name="config">Client configuration settings.</param>
         /// <remarks>
-        /// The client instance is reusable regardless of its connection status.
-        /// It is recommended to reuse existing instances instead of creating
-        /// new ones for each connection attempt.
+        /// The client instance is reusable regardless of its connection status. 
+        /// It is recommended to reuse existing instances instead of creating new ones for each connection attempt.
         /// </remarks>
         public EClient(ERSA ersa, EClientConfig config) : base(new ESocketResourceClient(config, ersa))
         {
@@ -72,7 +69,7 @@ namespace EnjoySockets
                 SocketResource.UserObj = this;
                 SocketResource.RunDisposeEvent = Dispose;
             }
-            _controlSending = new(SocketResource?.MessageBuffer ?? config.MessageBuffer * 1024);
+            _sendFlowController = new(SocketResource?.MessageBuffer ?? config.MessageBuffer * 1024);
             UserId = SetGuidUserId();
         }
 
@@ -86,8 +83,7 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Sends a message without payload to the specified target,
-        /// and awaits a guaranteed response.
+        /// Sends a message without payload to the specified target and awaits a guaranteed response.
         /// </summary>
         /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
         public ValueTask<ETransactResult> SendTransact(string target)
@@ -96,8 +92,7 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Sends a message with payload to the specified target,
-        /// and awaits a guaranteed response.
+        /// Sends a message with payload to the specified target and awaits a guaranteed response.
         /// </summary>
         /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
         public ValueTask<ETransactResult> SendTransact<T>(string target, T obj)
@@ -106,8 +101,7 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Sends a message without payload to the specified target and instance,
-        /// and awaits a guaranteed response.
+        /// Sends a message without payload to the specified target and instance and awaits a guaranteed response.
         /// </summary>
         /// <inheritdoc cref="SendTransact{T}(long, string, T)"/>
         public ValueTask<ETransactResult> SendTransact(long instance, string target)
@@ -116,24 +110,23 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Sends a message with a payload to the specified target and instance,
-        /// and awaits a guaranteed response.
+        /// Sends a message with a payload to the specified target and instance, and awaits a guaranteed response.
         /// </summary>
         /// <remarks>
-        /// This method guarantees that a response will be received even if the connection
-        /// was temporarily lost and the client is in reconnection mode.
+        /// This method guarantees that a response will be received even if the connection was temporarily lost and the client is in reconnection mode.
         /// <para>
         /// The returned <see langword="long"/> value encodes the outcome:
         /// <list type="bullet">
-        /// <item><c>0</c> - the operation completed successfully.</item>
-        /// <item><c>-1</c> - method execution failed.</item>
-        /// <item><c>-2</c> - buffer full (unable to rent memory).</item>
-        /// <item><c>-3</c> - session expired (response could not be retrieved).</item>
-        /// <item><c>-4</c> - access denied.</item>
-        /// <item><c>-5</c> - invalid payload or invalid arguments (e.g., null parameters, empty data, or deserialization failure).</item>
+        /// <item><c><see cref="ETransactResult.Success"/> (0)</c> - the operation completed successfully.</item>
+        /// <item><c><see cref="ETransactResult.ExecutionFailed"/> (-1)</c> - method execution failed.</item>
+        /// <item><c><see cref="ETransactResult.BufferFull"/> (-2)</c> - buffer full (unable to rent memory).</item>
+        /// <item><c><see cref="ETransactResult.SessionExpired"/> (-3)</c> - session expired (response could not be retrieved).</item>
+        /// <item><c><see cref="ETransactResult.AccessDenied"/> (-4)</c> - access denied.</item>
+        /// <item><c><see cref="ETransactResult.InvalidPayload"/> (-5)</c> - invalid payload or invalid arguments (e.g., null parameters, empty data, or deserialization failure).</item>
         /// <item>
-        /// <c>&gt; 0</c> - user-defined or application-specific codes, such as instance ID or internal status.
+        /// <c><see cref="ETransactResult.IsCustomCode"/> (&gt;0 and &lt;=1_000_000)</c> - user-defined or application-specific codes or internal status.
         /// </item>
+        /// <item><c><see cref="ETransactResult.IsEntityId"/> (&gt;1_000_000)</c> - result represents a server-generated entity identifier (e.g. instance ID)</item>
         /// </list>
         /// </para>
         /// </remarks>
@@ -143,7 +136,7 @@ namespace EnjoySockets
         /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
         /// <returns>
         /// A <see langword="long"/> representing the outcome:
-        /// <c>0</c> for success, &lt;0 for predefined errors, &gt;0 for user-defined results.
+        /// <c><see cref="ETransactResult.IsSuccess"/> (0)</c> for success, <c><see cref="ETransactResult.IsSystemError"/> (&lt;0)</c> for predefined errors.
         /// </returns>
         public async ValueTask<ETransactResult> SendTransact<T>(long instance, string target, T? obj)
         {
@@ -166,38 +159,146 @@ namespace EnjoySockets
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
             length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
-            ClientSendPermit? ecsw;
-            if ((ecsw = _controlSending.TryWait(length)) == null)
-                ecsw = await _controlSending.Wait(length);
+            ClientSendPermit? csp;
+            if ((csp = _sendFlowController.TryWait(length)) == null)
+                csp = await _sendFlowController.Wait(length);
 
-            if (ecsw.Cancel)
+            if (csp.Cancel)
             {
                 segments?.Clear();
-                _controlSending.Release(ecsw);
+                _sendFlowController.Release(csp);
                 return ETransactResult.ExecutionFailed;
             }
 
             ulong session = SocketResource.GetSession();
-            var sender = SocketResource.MsgCache.Get(session, t, instance, segments);
-            if (sender == null)
+            var context = SocketResource.MsgTracker.Get(session, t, instance, segments);
+            if (context == null)
             {
                 segments?.Clear();
-                _controlSending.Release(ecsw);
+                _sendFlowController.Release(csp);
                 return ETransactResult.ExecutionFailed;
             }
 
-            var objMsg = SocketResource.ExecutorSend._messagePool.Rent();
-            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
-            objMsg.Session = session;
+            var objMsg = SocketResource.ExecutorSend.MessagePool.Rent();
+            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance, session);
 
             var vt = SocketResource.ExecutorSend.TrySendMsgAndGetSession(objMsg);
             if (!vt.IsCompletedSuccessfully)
                 await vt;
 
-            var resultFromServ = await sender.AsValueTask();
-            SocketResource.MsgCache.Remove(session);
-            _controlSending.Release(ecsw);
+            var resultFromServ = await context.AsValueTask();
+            SocketResource.MsgTracker.Remove(session);
+            _sendFlowController.Release(csp);
             return resultFromServ;
+        }
+
+        /// <summary>
+        /// Sends a message without payload to the specified target and awaits a response.
+        /// </summary>
+        /// <inheritdoc cref="SendAndFetch{TResponse, T}(long, string, T)"/>
+        public ValueTask<TResponse?> SendAndFetch<TResponse>(string target)
+        {
+            return SendAndFetch<TResponse>(0, target);
+        }
+
+        /// <summary>
+        /// Sends a message with payload to the specified target and awaits a response.
+        /// </summary>
+        /// <inheritdoc cref="SendAndFetch{TResponse, T}(long, string, T)"/>
+        public ValueTask<TResponse?> SendAndFetch<TResponse, T>(string target, T obj)
+        {
+            return SendAndFetch<TResponse, T>(0, target, obj);
+        }
+
+        /// <summary>
+        /// Sends a message without payload to the specified target and instance, and awaits a response.
+        /// </summary>
+        /// <inheritdoc cref="SendAndFetch{TResponse, T}(long, string, T)"/>
+        public ValueTask<TResponse?> SendAndFetch<TResponse>(long instance, string target)
+        {
+            return SendAndFetch<TResponse, object>(instance, target, null);
+        }
+
+        /// <summary>
+        /// Sends a message with a payload to the specified target and instance, and awaits a response.
+        /// </summary>
+        /// <remarks>
+        /// This method guarantees that the call will not complete immediately on transient transport failures.
+        /// If the connection is lost, the operation will be suspended and resumed once the connection is restored,
+        /// or completed when a manual disconnect or cancellation occurs.
+        /// <para/>
+        /// The method returns a response if the operation succeeds. If the transport layer fails 
+        /// (e.g. connection loss, reconnection state, or serialization/dispatch error), 
+        /// the method returns <c>null</c> or <c>default(<typeparamref name="TResponse"/>)</c> depending on whether <typeparamref name="TResponse"/> is a reference or value type.
+        /// <para/>
+        /// Do not use non-nullable primitive types (e.g. <c>int</c>, <c>bool</c>) as <typeparamref name="TResponse"/>.
+        /// In failure scenarios, these types may return default values (e.g. <c>0</c>, <c>false</c>), which are indistinguishable from valid responses.
+        /// Prefer nullable types (e.g. <c>int?</c>, <c>bool?</c>) to explicitly detect transport failures.
+        /// </remarks>
+        /// <typeparam name="TResponse">The type of response sent from server.</typeparam>
+        /// <typeparam name="T">The type of the payload being sent.</typeparam>
+        /// <param name="instance">The target instance ID.</param>
+        /// <param name="target">The destination to which the message is sent.</param>
+        /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
+        public async ValueTask<TResponse?> SendAndFetch<TResponse, T>(long instance, string target, T? obj)
+        {
+            if (SocketResource?.BasicSocket == null)
+                return default;
+
+            var t = DispatcherRegistry.GetUlongToSend(target);
+            if (t < 1) return default;
+
+            var segments = SocketResource.ObjToSegments(obj);
+            if (segments == null && obj != null)
+                return default;
+
+            if (segments != null && segments.WrittenBytes > SocketResource.MessageBuffer)
+            {
+                segments?.Clear();
+                return default;
+            }
+
+            var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
+            length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
+            ClientSendPermit? csp;
+            if ((csp = _sendFlowController.TryWait(length)) == null)
+                csp = await _sendFlowController.Wait(length);
+
+            if (csp.Cancel)
+            {
+                segments?.Clear();
+                _sendFlowController.Release(csp);
+                return default;
+            }
+
+            ulong session = SocketResource.GetSession();
+            var context = SocketResource.MsgTracker.Get(session, t, instance, segments);
+            if (context == null)
+            {
+                segments?.Clear();
+                _sendFlowController.Release(csp);
+                return default;
+            }
+
+            var objMsg = SocketResource.ExecutorSend.MessagePool.Rent();
+            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance, session);
+
+            var vt = SocketResource.ExecutorSend.TrySendMsgAndGetSession(objMsg);
+            if (!vt.IsCompletedSuccessfully)
+                await vt;
+
+            var responseLong = await context.AsValueTask();
+
+            TResponse? response;
+            if (typeof(TResponse) == typeof(long))
+                response = (TResponse)(object)responseLong;
+            else
+                response = context.GetResponseMsg<TResponse>(SocketResource.ConfigClient.ESerial);
+
+            SocketResource.MsgTracker.Remove(session);
+            _sendFlowController.Release(csp);
+
+            return response;
         }
 
         public async override sealed ValueTask<bool> Send<T>(long instance, string target, T? obj) where T : default
@@ -221,30 +322,29 @@ namespace EnjoySockets
 
             var length = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
             length = Math.Max(length, ETCPSocket.MinBufferSlotSizeBytes);
-            ClientSendPermit? ecsw;
-            if ((ecsw = _controlSending.TryWait(length)) == null)
-                ecsw = await _controlSending.Wait(length);
+            ClientSendPermit? csp;
+            if ((csp = _sendFlowController.TryWait(length)) == null)
+                csp = await _sendFlowController.Wait(length);
 
-            if (ecsw.Cancel)
+            if (csp.Cancel)
             {
                 segments?.Clear();
-                _controlSending.Release(ecsw);
+                _sendFlowController.Release(csp);
                 return false;
             }
 
             var totalBytes = segments?.WrittenBytes ?? 0;
             ulong session = SocketResource.GetSession();
-            var sender = SocketResource.MsgCache.Get(session, totalBytes);
-            if (sender == null)
+            var context = SocketResource.MsgTracker.Get(session, totalBytes);
+            if (context == null)
             {
                 segments?.Clear();
-                _controlSending.Release(ecsw);
+                _sendFlowController.Release(csp);
                 return false;
             }
 
-            var objMsg = SocketResource.ExecutorSend._messagePool.Rent();
-            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance);
-            objMsg.Session = session;
+            var objMsg = SocketResource.ExecutorSend.MessagePool.Rent();
+            objMsg.RunPrepare(SocketResource.RunObjMsgSend, t, segments, instance, session);
 
             var success = false;
             var vt = SocketResource.ExecutorSend.TrySendMsgAndGetSession(objMsg);
@@ -257,20 +357,20 @@ namespace EnjoySockets
 
             if (!success)
             {
-                SocketResource.MsgCache.Remove(session);
-                _controlSending.Release(ecsw);
+                SocketResource.MsgTracker.Remove(session);
+                _sendFlowController.Release(csp);
                 return false;
             }
 
-            _ = SendWaitOnResultFromServ(SocketResource, session, ecsw, sender);
+            _ = SendWaitOnResultFromServ(SocketResource, session, csp, context);
             return true;
         }
 
-        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, ClientSendPermit ecsw, ClientReliableSendContext sender)
+        async ValueTask SendWaitOnResultFromServ(ESocketResourceClient sr, ulong session, ClientSendPermit ecsw, ClientReliableSendContext context)
         {
-            await sender.AsValueTask();
-            sr.MsgCache.Remove(session);
-            _controlSending.Release(ecsw);
+            await context.AsValueTask();
+            sr.MsgTracker.Remove(session);
+            _sendFlowController.Release(ecsw);
         }
 
         #region Connection
@@ -297,8 +397,7 @@ namespace EnjoySockets
         /// </summary>
         /// <param name="attemptCount">The current reconnection attempt number.</param>
         /// <param name="attemptResult">
-        /// The result code of the attempt. A value of <c>0</c> typically indicates success;
-        /// any other value represents an error.
+        /// The result code of the attempt. A value of <c>0</c> typically indicates success; any other value represents an error.
         /// </param>
         protected virtual void OnReconnectAttempt(int attemptCount, byte attemptResult) { }
 
@@ -307,32 +406,31 @@ namespace EnjoySockets
         /// <summary>
         /// Asynchronously connects to the server endpoint and performs handshake.
         /// </summary>
-        /// <param name="eAddress">Optional server endpoint; uses <c>Address</c> if null.</param>
-        /// <param name="reconnectDelayMs">
-        /// Delay in milliseconds between reconnection attempts (default 5000ms).
-        /// Must be between 1000 and 60000 milliseconds; if the value is outside this range,
-        /// the default of 5000ms will be used.
-        /// </param>
-        /// <returns>
-        /// A <see cref="byte"/> status code representing the result of the connection attempt:
-        /// <list type="table">
-        /// <item><term>0</term><description>Connection succeeded.</description></item>
-        /// <item><term>1</term><description>Invalid endpoint (IP or address).</description></item>
-        /// <item><term>2</term><description>Connection attempt timed out.</description></item>
-        /// <item><term>3</term><description>Server is full.</description></item>
-        /// <item><term>4</term><description>Server verification failed.</description></item>
-        /// <item><term>5</term><description>Handshake (encryption key exchange) failed.</description></item>
-        /// <item><term>6</term><description>Server unavailable or connection failed.</description></item>
-        /// <item><term>7</term><description>Invalid authentication data.</description></item>
-        /// <item><term>8</term><description>Connection already active or in progress.</description></item>
-        /// <item><term>9</term><description>Reconnect cancelled via Disconnect.</description></item>
-        /// </list>
-        /// Values &gt; 9 may be used for custom authorization error codes if authorization is implemented.
-        /// </returns>
         /// <remarks>
         /// The reconnect loop can be interrupted by calling <see cref="Disconnect"/>.
         /// This method builds on <see cref="Connect(EAddress?)"/> but adds automatic reconnection logic.
         /// </remarks>
+        /// <param name="eAddress">Optional server endpoint; uses <c>Address</c> if null.</param>
+        /// <param name="reconnectDelayMs">
+        /// Delay in milliseconds between reconnection attempts (default 5000ms).
+        /// Must be between 1000 and 60000 milliseconds; if the value is outside this range, the default of 5000ms will be used.
+        /// </param>
+        /// <returns>
+        /// A <see cref="byte"/> status code representing the result of the connection attempt:
+        /// <list type="table">
+        /// <item><c><see cref="EConnectResult.Success"/> (0)</c> - connection succeeded.</item>
+        /// <item><c><see cref="EConnectResult.InvalidEndpoint"/> (1)</c> - invalid endpoint (IP or address).</item>
+        /// <item><c><see cref="EConnectResult.Timeout"/> (2)</c> - connection attempt timed out.</item>
+        /// <item><c><see cref="EConnectResult.ServerFull"/> (3)</c> - server is full.</item>
+        /// <item><c><see cref="EConnectResult.ServerVerificationFailed"/> (4)</c> - server verification failed.</item>
+        /// <item><c><see cref="EConnectResult.HandshakeFailed"/> (5)</c> - handshake (encryption key exchange) failed.</item>
+        /// <item><c><see cref="EConnectResult.ServerUnavailable"/> (6)</c> - server unavailable or connection failed.</item>
+        /// <item><c><see cref="EConnectResult.InvalidAuthData"/> (7)</c> - invalid authentication data.</item>
+        /// <item><c><see cref="EConnectResult.AlreadyConnectedOrConnecting"/> (8)</c> - connection already active or in progress.</item>
+        /// <item><c><see cref="EConnectResult.ReconnectCancelled"/> (9)</c> - reconnect cancelled via <see cref="Disconnect"/>.</item>
+        /// <item><c><see cref="EConnectResult.IsCustomError"/> (&gt;9)</c> - is a custom user-defined error code</item>
+        /// </list>
+        /// </returns>
         public Task<EConnectResult> ConnectWithAutoReconnect(EAddress? eAddress, int reconnectDelayMs = 5000)
         {
             _reconnectDelayMs = reconnectDelayMs < _minReconnectDelayMs || reconnectDelayMs > _maxReconnectDelayMs ? 5000 : reconnectDelayMs;
@@ -393,17 +491,17 @@ namespace EnjoySockets
         /// <returns>
         /// A <see cref="byte"/> status code representing the result of the connection attempt:
         /// <list type="table">
-        /// <item><term>0</term><description>Connection succeeded.</description></item>
-        /// <item><term>1</term><description>Invalid endpoint (IP or address).</description></item>
-        /// <item><term>2</term><description>Connection attempt timed out.</description></item>
-        /// <item><term>3</term><description>Server is full.</description></item>
-        /// <item><term>4</term><description>Server verification failed.</description></item>
-        /// <item><term>5</term><description>Handshake (encryption key exchange) failed.</description></item>
-        /// <item><term>6</term><description>Server unavailable or connection failed.</description></item>
-        /// <item><term>7</term><description>Invalid authentication data.</description></item>
-        /// <item><term>8</term><description>Connection already active or in progress.</description></item>
+        /// <item><c><see cref="EConnectResult.Success"/> (0)</c> - connection succeeded.</item>
+        /// <item><c><see cref="EConnectResult.InvalidEndpoint"/> (1)</c> - invalid endpoint (IP or address).</item>
+        /// <item><c><see cref="EConnectResult.Timeout"/> (2)</c> - connection attempt timed out.</item>
+        /// <item><c><see cref="EConnectResult.ServerFull"/> (3)</c> - server is full.</item>
+        /// <item><c><see cref="EConnectResult.ServerVerificationFailed"/> (4)</c> - server verification failed.</item>
+        /// <item><c><see cref="EConnectResult.HandshakeFailed"/> (5)</c> - handshake (encryption key exchange) failed.</item>
+        /// <item><c><see cref="EConnectResult.ServerUnavailable"/> (6)</c> - server unavailable or connection failed.</item>
+        /// <item><c><see cref="EConnectResult.InvalidAuthData"/> (7)</c> - invalid authentication data.</item>
+        /// <item><c><see cref="EConnectResult.AlreadyConnectedOrConnecting"/> (8)</c> - connection already active or in progress.</item>
+        /// <item><c><see cref="EConnectResult.IsCustomError"/> (&gt;9)</c> - is a custom user-defined error code</item>
         /// </list>
-        /// Values &gt; 9 may be used for custom authorization error codes if authorization is implemented.
         /// </returns>
         public async Task<EConnectResult> Connect(EAddress? eAddress)
         {
@@ -731,7 +829,7 @@ namespace EnjoySockets
             if (status == EClientStatus.Disconnected)
             {
                 HeartbeatStop();
-                _controlSending.CancelAll();
+                _sendFlowController.CancelAll();
                 OnDisconnected();
             }
         }

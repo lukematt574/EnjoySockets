@@ -28,8 +28,7 @@ namespace EnjoySockets
         public EServerSessionStatus Status { get; private set; } = EServerSessionStatus.Alive;
         internal MethodInfo? AuthorizationMethod { get; set; }
         internal Action<EServerSession, ESocketResourceServer?>? ReleaseEvent { get; set; }
-
-        private protected ServerBufferQuota BufferToSendMsg;
+        internal ServerBufferQuota BufferToSendMsg { get; private set; }
 
         public EServerSession(ESocketResourceServer eSocketResource) : base(eSocketResource)
         {

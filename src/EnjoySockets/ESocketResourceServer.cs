@@ -267,6 +267,62 @@ namespace EnjoySockets
             return SendSpecial(session, typeMsg, msg);
         }
 
+        EServerSession? _session;
+        internal override sealed ValueTask<bool> SendResponseMsg(ulong session, object? obj, Type? t)
+        {
+            if (obj == null || t == null)
+                return ValueTask.FromResult(false);
+
+            EServerSession? sess = null;
+            lock (_Lock)
+            {
+                if (Running)
+                    sess = _session ??= UserObj as EServerSession;
+            }
+
+            if (sess != null && sess.Status == EServerSessionStatus.Alive)
+            {
+                var segments = ESerializeMsgObj!.EncodeToSegments(obj, t, Config.ESerial);
+                if (segments == null)
+                    return ValueTask.FromResult(false);
+
+                var rentBytesToBuffer = segments?.WrittenBytes ?? ETCPSocket.MinBufferSlotSizeBytes;
+                rentBytesToBuffer = Math.Max(rentBytesToBuffer, ETCPSocket.MinBufferSlotSizeBytes);
+                if (!sess.BufferToSendMsg.TryRent(rentBytesToBuffer))
+                {
+                    segments?.Clear();
+                    return ValueTask.FromResult(false);
+                }
+
+                var msgOperation = ExecutorSend.MessagePool.Rent();
+                msgOperation.RunPrepare(RunObjMsgResponseSend, 0, segments, 0, session);
+
+                var vt = ExecutorSend.TrySendMsgAndGetSession(msgOperation);
+                if (vt.IsCompletedSuccessfully)
+                {
+                    var res = vt.Result;
+                    segments?.Clear();
+                    sess.BufferToSendMsg.Return(rentBytesToBuffer);
+                    return ValueTask.FromResult(res != 0);
+                }
+                return AwaitSendObjAsync(vt, rentBytesToBuffer, segments, sess);
+            }
+            return ValueTask.FromResult(false);
+        }
+
+        async ValueTask<bool> AwaitSendObjAsync(ValueTask<ulong> vt, int buffer, MemorySegment? segments, EServerSession sess)
+        {
+            try
+            {
+                return (await vt) != 0;
+            }
+            finally
+            {
+                segments?.Clear();
+                sess.BufferToSendMsg.Return(buffer);
+            }
+        }
+
         int _maxSendSpecialCount;
         const int _limitSendSpecial = ETCPSocket.MaxServerStoredResponsesPerSession * 2;
         internal override sealed ValueTask<bool> SendSpecial(ulong session, ulong typeMsg, long? msg)
@@ -306,6 +362,8 @@ namespace EnjoySockets
         internal override sealed void Dispose()
         {
             base.Dispose();
+            lock (_Lock)
+                _session = null;
             BufferToReceiveMsg.Reset();
             FirstConnect = true;
         }

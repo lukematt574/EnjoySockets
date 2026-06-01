@@ -23,6 +23,8 @@ namespace EnjoySockets
             if (obj == null) return;
             obj.Msg?.Clear();
             obj.Msg = null;
+            obj.ResponseMsg?.Clear();
+            obj.ResponseMsg = null;
             obj.Session = 0;
             obj.Target = 0;
             obj.Instance = 0;
@@ -78,6 +80,23 @@ namespace EnjoySockets
         {
             if (_buffer.TryRemove(session, out ClientReliableSendContext? sender))
                 Return(sender);
+        }
+
+        internal void SetResponseMsgPart(ReadOnlySpan<byte> pack, int maxMessageBuffer, MemorySegmentPool segmentPool)
+        {
+            var session = ESocketResource.ReadSession(pack);
+            if (_buffer.TryGetValue(session, out ClientReliableSendContext? context))
+            {
+                var sMsg = context.ResponseMsg;
+                if (sMsg == null)
+                    context.ResponseMsg = sMsg = segmentPool.Rent();
+
+                var payload = ESocketResource.ReadPayload(pack);
+                if (sMsg.WrittenBytes + payload.Length > maxMessageBuffer)
+                    return;
+
+                sMsg.Append(payload);
+            }
         }
 
         internal ClientReliableSendContext? SetBrokeMsgToSend(ulong session, long? offset)

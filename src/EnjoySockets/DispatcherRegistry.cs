@@ -74,9 +74,7 @@ namespace EnjoySockets
                 var target = GetUlongFromString(obj.Key);
                 if (target == 0)
                 {
-#if DEBUG
-                    Debug.WriteLine($"Unavailable method name: {obj.Key}");
-#endif
+                    Log($"Unavailable method name: {obj.Key}");
                     continue;
                 }
 
@@ -89,9 +87,7 @@ namespace EnjoySockets
                 }
                 else
                 {
-#if DEBUG
-                    Debug.WriteLine($"Repeated method name: {obj.Key}");
-#endif
+                    Log($"Repeated method name: {obj.Key}");
                 }
             }
 
@@ -162,9 +158,7 @@ namespace EnjoySockets
                 }
                 else
                 {
-#if DEBUG
-                    Debug.WriteLine($"Repeated channel id: {Value}");
-#endif
+                    Log($"Repeated channel id: {Value}");
                 }
             }
         }
@@ -200,9 +194,7 @@ namespace EnjoySockets
                 }
                 else
                 {
-#if DEBUG
-                    Debug.WriteLine($"Repeated pool obj id: {Value}");
-#endif
+                    Log($"Repeated pool obj id: {Value}");
                 }
             }
         }
@@ -215,9 +207,7 @@ namespace EnjoySockets
             var staticMethod = list.FirstOrDefault(x => x.method.IsStatic);
             if (staticMethod.method != null)
             {
-#if DEBUG
                 LogRejected(key, staticMethod, list);
-#endif
                 return staticMethod;
             }
 
@@ -229,16 +219,12 @@ namespace EnjoySockets
             if (overrides.Count != 0)
             {
                 var overrideM = overrides.First();
-#if DEBUG
                 LogRejected(key, overrideM, list);
-#endif
                 return overrideM;
             }
 
             var first = list.First();
-#if DEBUG
             LogRejected(key, first, list);
-#endif
             return first;
         }
 
@@ -251,6 +237,16 @@ namespace EnjoySockets
                 type = type.BaseType;
             }
             return depth;
+        }
+
+        [Conditional("DEBUG")]
+        static void LogRejected(string key, (MethodInfo method, Type type) selected, List<(MethodInfo method, Type type)> all)
+        {
+            Debug.WriteLine(
+                $"\n[{key}]\n Register:"
+            );
+
+            Debug.WriteLine($"  - {BuildPrefix(selected.method)} {Format(selected)}");
         }
 
         static string BuildPrefix(MethodInfo method)
@@ -270,15 +266,6 @@ namespace EnjoySockets
                 prefixes.Add("[OVERRIDE]");
 
             return string.Concat(prefixes);
-        }
-
-        static void LogRejected(string key, (MethodInfo method, Type type) selected, List<(MethodInfo method, Type type)> all)
-        {
-            Debug.WriteLine(
-                $"\n[{key}]\n Register:"
-            );
-
-            Debug.WriteLine($"  - {BuildPrefix(selected.method)} {Format(selected)}");
         }
 
         static string Format((MethodInfo method, Type type) entry)
@@ -345,22 +332,33 @@ namespace EnjoySockets
             else
                 return false;
 
-            if (methodInfo.ReturnType == typeof(void))
+            var rType = methodInfo.ReturnType;
+            if (rType == typeof(void))
             {
                 if (methodInfo.GetCustomAttribute(typeof(System.Runtime.CompilerServices.AsyncStateMachineAttribute)) != null)
                     return false;
                 else
                     return true;
             }
-            else if (socketRole == ESocketRole.Server &&
-                (methodInfo.ReturnType == typeof(Task) ||
-               methodInfo.ReturnType == typeof(Task<long>) ||
-               methodInfo.ReturnType == typeof(long)))
+            else if (socketRole == ESocketRole.Server)
             {
+                if (rType == typeof(Task))
+                    return true;
+
+                if (typeof(Task).IsAssignableFrom(rType) && rType.IsGenericType)
+                    return true;
+
+                if (typeof(Delegate).IsAssignableFrom(rType) ||
+                        rType == typeof(ValueTask) ||
+                        (rType.IsGenericType &&
+                         rType.GetGenericTypeDefinition() == typeof(ValueTask<>)) ||
+                        rType.IsByRefLike)
+                {
+                    return false;
+                }
                 return true;
             }
-            else if (socketRole == ESocketRole.Client &&
-                (methodInfo.ReturnType == typeof(Task)))
+            else if (socketRole == ESocketRole.Client && (rType == typeof(Task)))
             {
                 return true;
             }
@@ -374,9 +372,7 @@ namespace EnjoySockets
 
             if (type == typeof(string))
             {
-#if DEBUG
-                Debug.WriteLine($"Cannot pooling type: {type.Name}");
-#endif
+                Log($"Cannot pooling type: {type.Name}");
             }
 
             var id = (type, eId);
@@ -394,12 +390,16 @@ namespace EnjoySockets
                 }
                 else
                 {
-#if DEBUG
-                    Debug.WriteLine($"Cannot pooling type: {type.Name}");
-#endif
+                    Log($"Cannot pooling type: {type.Name}");
                 }
             }
             return null;
+        }
+
+        [Conditional("DEBUG")]
+        static void Log(string text)
+        {
+            Debug.WriteLine(text);
         }
 
         /// <summary>

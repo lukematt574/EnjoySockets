@@ -7,12 +7,12 @@ namespace EnjoySockets
         internal byte[] Salt = new byte[32];
 
         internal EClientConfig ConfigClient { get; }
-        internal ClientReliableSendTracker MsgCache { get; }
+        internal ClientReliableSendTracker MsgTracker { get; }
 
         internal ESocketResourceClient(EClientConfig config, ERSA ersa) : base(ESocketRole.Client, config, ersa)
         {
             ConfigClient = config.Clone();
-            MsgCache = new();
+            MsgTracker = new();
             if (Heartbeat > 0)
                 _ = StartHeartbeat();
         }
@@ -112,20 +112,29 @@ namespace EnjoySockets
             }
         }
 
+        private protected sealed override bool ReceiveMsgResponse(ReadOnlySpan<byte> dto)
+        {
+            if (ReadTotalBytes(dto) <= MessageBuffer)
+            {
+                MsgTracker.SetResponseMsgPart(dto, MessageBuffer, MemorySegmentPool);
+            }
+            return true;
+        }
+
         private protected sealed override bool ReceiveSpecial(ReadOnlySpan<byte> dto)
         {
             switch (ReadTarget(dto))
             {
                 case 0: break;
-                case 1: MsgCache.SetEndMsg(ReadSession(dto), ReadMsgFromPayload(dto)); break;//method executed. The result is stored in msg. Possible error: -1 = method execution failed.
+                case 1: MsgTracker.SetEndMsg(ReadSession(dto), ReadMsgFromPayload(dto)); break;//method executed. The result is stored in msg. Possible error: -1 = method execution failed.
                 case 2:
                     var msg = ReadMsgFromPayload(dto);
-                    MsgCache.SetEndMsg(ReadSession(dto), msg == 2 ? -2 : -5);
+                    MsgTracker.SetEndMsg(ReadSession(dto), msg == 2 ? -2 : -5);
                     break;
-                case 3: MsgCache.SetEndMsg(ReadSession(dto), -3); break;//response could not be retrieved (session expired)
-                case 4: MsgCache.SetEndMsg(ReadSession(dto), -2); break;//buffer full
-                case 5: MsgCache.SetEndMsg(ReadSession(dto), -4); break;//access denied
-                case 6: MsgCache.SetEndMsg(ReadSession(dto), -5); break;//invalid payload
+                case 3: MsgTracker.SetEndMsg(ReadSession(dto), -3); break;//response could not be retrieved (session expired)
+                case 4: MsgTracker.SetEndMsg(ReadSession(dto), -2); break;//buffer full
+                case 5: MsgTracker.SetEndMsg(ReadSession(dto), -4); break;//access denied
+                case 6: MsgTracker.SetEndMsg(ReadSession(dto), -5); break;//invalid payload
                 case 7: SetBrokeMsgToSend(dto); break;//resend remaining bytes starting from the position specified in msg (if use 'SendWithResponse' method)
             }
             return true;
@@ -135,22 +144,22 @@ namespace EnjoySockets
         {
             var offset = ReadMsgFromPayload(dto);
             var session = ReadSession(dto);
-            var sender = MsgCache.SetBrokeMsgToSend(session, offset);
+            var sender = MsgTracker.SetBrokeMsgToSend(session, offset);
             if (sender != null)
             {
-                var obj = ExecutorSend._messagePool.Rent();
+                var obj = ExecutorSend.MessagePool.Rent();
                 obj.RunPrepare(RunObjMsgSend, sender.Target, sender.Msg, sender.Instance);
                 obj.SetToWriteAndSession((long)offset!, sender.Session);
                 ExecutorSend.TrySendMsgAndGetSession(obj);
             }
             else
-                MsgCache.SetEndMsg(session, -3);
+                MsgTracker.SetEndMsg(session, -3);
         }
 
         internal async ValueTask<bool> RebuildSessions()
         {
             var maxSession = GetSession();
-            var list = MsgCache.GetNonReceivedSessions();
+            var list = MsgTracker.GetNonReceivedSessions();
             bool sendMax = true;
             foreach (var item in list)
             {
@@ -176,7 +185,7 @@ namespace EnjoySockets
         internal override sealed void Dispose()
         {
             base.Dispose();
-            MsgCache.Clear();
+            MsgTracker.Clear();
         }
 
         private protected sealed override void DisposeReceiveDataSessions()

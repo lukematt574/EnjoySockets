@@ -88,17 +88,7 @@ namespace EnjoySockets
         /// <summary>
         /// Sends a message without a payload to the specified target.
         /// </summary>
-        /// <remarks>
-        /// The message is considered sent once it is successfully handed off to the operating system.
-        /// <para>
-        /// This does not guarantee delivery to the receiving client.
-        /// </para>
-        /// </remarks>
-        /// <param name="target">The destination to which the message is sent.</param>
-        /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
-        /// otherwise, <see langword="false"/>.
-        /// </returns>
+        /// <inheritdoc cref="Send{T}(long, string, T)"/>
         public ValueTask<bool> Send(string target)
         {
             return Send(0, target);
@@ -107,19 +97,7 @@ namespace EnjoySockets
         /// <summary>
         /// Sends a message with a payload to the specified target.
         /// </summary>
-        /// <remarks>
-        /// The message is considered sent once it is successfully handed off to the operating system.
-        /// <para>
-        /// This does not guarantee delivery to the receiving client.
-        /// </para>
-        /// </remarks>
-        /// <typeparam name="T">The type of the payload being sent.</typeparam>
-        /// <param name="target">The destination to which the message is sent.</param>
-        /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
-        /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
-        /// otherwise, <see langword="false"/>.
-        /// </returns>
+        /// <inheritdoc cref="Send{T}(long, string, T)"/>
         public ValueTask<bool> Send<T>(string target, T? obj)
         {
             return Send(0, target, obj);
@@ -128,23 +106,29 @@ namespace EnjoySockets
         /// <summary>
         /// Sends a message without a payload to the specified target and specified instance.
         /// </summary>
-        /// <remarks>
-        /// The message is considered sent once it is successfully handed off to the operating system.
-        /// <para>
-        /// This does not guarantee delivery to the receiving client.
-        /// </para>
-        /// </remarks>
-        /// <param name="instance">The destination to which instance the message is sent.</param>
-        /// <param name="target">The destination to which the message is sent.</param>
-        /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
-        /// otherwise, <see langword="false"/>.
-        /// </returns>
+        /// <inheritdoc cref="Send{T}(long, string, T)"/>
         public ValueTask<bool> Send(long instance, string target)
         {
             return Send<object>(instance, target, null);
         }
 
+        /// <summary>
+        /// Sends a message with a payload to the specified target and specified instance.
+        /// </summary>
+        /// <remarks>
+        /// The message is considered sent once it is successfully handed off to the operating system.
+        /// <para>
+        /// This does not guarantee delivery to the receiving destination.
+        /// </para>
+        /// </remarks>
+        /// <typeparam name="T">The type of the payload being sent.</typeparam>
+        /// <param name="instance">The destination to which instance the message is sent.</param>
+        /// <param name="target">The destination to which the message is sent.</param>
+        /// <param name="obj">The payload object to send. May be <see langword="null"/>.</param>
+        /// <returns>
+        /// <see langword="true"/> if the message was successfully passed to the operating system;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
         public virtual ValueTask<bool> Send<T>(long instance, string target, T? obj)
         {
             return ValueTask.FromResult(false);

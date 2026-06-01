@@ -63,16 +63,16 @@ using EnjoySockets;
 string pemKeyPrivate = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 string pemKeyPrivateSign = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 
-var server = new ETCPServer(new(pemKeyPrivate, pemKeyPrivateSign));
+var server = new EServer(new(pemKeyPrivate, pemKeyPrivateSign));
 server.Start(EAddress.Get());
 
 Console.ReadKey();
 
 static class ExampleReceiveClassServer
 {
-    static void TestMethod(EUserServer user)
+    static void TestMethod(EServerSession session)
     {
-        user.Send("ResponseTestMethod", Random.Shared.Next());
+        session.Send("ResponseTestMethod", Random.Shared.Next());
     }
 }
 
@@ -87,16 +87,16 @@ using EnjoySockets;
 string pemKeyPublic = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 
-var client = new EUserClient(new(pemKeyPublic, pemKeyPublicSign));
+var client = new EClient(new(pemKeyPublic, pemKeyPublicSign));
 
-if(await client.Connect(EAddress.Get()) == 0)
+if(await client.Connect(EAddress.Get()).IsSuccess)
 	await client.Send("TestMethod");
 
 Console.ReadKey();
 
 static class ExampleReceiveClassClient
 {
-    static void ResponseTestMethod(EUserClient user, int luckyNumber)
+    static void ResponseTestMethod(EClient client, int luckyNumber)
     {
         Console.WriteLine($"Your lucky number from server is: {luckyNumber}");
     }

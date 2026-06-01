@@ -132,7 +132,7 @@ namespace EnjoySockets
         {
             lock (_lock)
             {
-                if (_pool.Count < 50)
+                if (_pool.Count < maxUseMsges)
                     _pool.Push(permit);
             }
         }

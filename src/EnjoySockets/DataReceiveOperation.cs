@@ -4,7 +4,6 @@ namespace EnjoySockets
 {
     internal abstract class DataReceiveOperation
     {
-        public DataForm Form { get; protected set; }
         internal ulong Session { get; private set; }
         internal int TotalBytes { get; private set; }
         internal long Instance { get; private set; }
@@ -43,6 +42,7 @@ namespace EnjoySockets
         }
 
         internal virtual int TryPushPart(ReadOnlySpan<byte> part, MemorySegmentPool pool, IESerializer serializer) { return 0; }
+
         internal ValueTask<long> Run()
         {
             var handler = Handler!;
@@ -61,11 +61,13 @@ namespace EnjoySockets
                 else
                     result = handler.MethodInfo.Invoke(InstanceObj, GetArgs());
 
-                return result switch
+                return handler.ResKind switch
                 {
-                    long l => ValueTask.FromResult(Response = l),
-                    Task<long> taskLong => AwaitTaskLong(taskLong),
-                    Task task => AwaitTask(task),
+                    ResponseKind.Long => ValueTask.FromResult(Response = (long)result!),
+                    ResponseKind.TaskLong => AwaitTaskLong((Task<long>)result!),
+                    ResponseKind.Task => AwaitTask((Task)result!),
+                    ResponseKind.TaskObject => AwaitTaskSendObject(result!, handler),
+                    ResponseKind.Object => AwaitSendObject(result, handler),
                     _ => ValueTask.FromResult(Response = 0)
                 };
             }
@@ -80,6 +82,20 @@ namespace EnjoySockets
         {
             var result = await task;
             return Response = result;
+        }
+
+        private async ValueTask<long> AwaitTaskSendObject(object obj, DispatchHandler handler)
+        {
+            await (Task)obj;
+            var rValue = handler.PIResponse?.GetValue(obj);
+            await ESocketResourceObj!.SendResponseMsg(Session, rValue, handler.ArgResponse);
+            return Response = 0;
+        }
+
+        private async ValueTask<long> AwaitSendObject(object? obj, DispatchHandler handler)
+        {
+            await ESocketResourceObj!.SendResponseMsg(Session, obj, handler.ArgResponse);
+            return Response = 0;
         }
 
         private async ValueTask<long> AwaitTask(Task task)

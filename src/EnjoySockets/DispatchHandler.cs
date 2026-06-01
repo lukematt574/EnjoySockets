@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Luke Matt. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 using System.Buffers;
+using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -9,7 +10,18 @@ namespace EnjoySockets
     internal enum DataForm : byte
     {
         Msg = 0,
-        Special = 1
+        Special = 1,
+        MsgResponse = 2
+    }
+
+    internal enum ResponseKind : byte
+    {
+        Void = 0,
+        Long = 1,
+        TaskLong = 2,
+        Task = 3,
+        TaskObject = 4,
+        Object = 5
     }
 
     internal sealed class DispatchHandler
@@ -21,6 +33,11 @@ namespace EnjoySockets
         internal Type? ArgType { get; }
         internal bool ArgAllowNull { get; }
         internal TypeObjectPool? ArgPool { get; }
+
+        internal Type? ArgResponse { get; private set; }
+        internal PropertyInfo? PIResponse { get; private set; }
+        internal ResponseKind ResKind { get; private set; }
+
         internal Func<object, object[], object>? Execute { get; }
 
         internal DispatchHandler(ESocketRole socketRole, EAttr methodAttr, MethodInfo mInfo, Type? argType, bool argAllowNull, TypeObjectPool? pool, Type classType)
@@ -32,8 +49,44 @@ namespace EnjoySockets
             ClassType = classType;
             ArgAllowNull = argAllowNull;
             ArgPool = pool;
+            SetResKind(MethodInfo.ReturnType);
             if (EServer.IsJIT)
                 Execute = CreateInvoker(MethodInfo);
+        }
+
+        void SetResKind(Type type)
+        {
+            if (type == typeof(void))
+            {
+                ResKind = ResponseKind.Void;
+            }
+            else if (type == typeof(long))
+            {
+                ResKind = ResponseKind.Long;
+            }
+            else if (type == typeof(Task<long>))
+            {
+                ResKind = ResponseKind.TaskLong;
+            }
+            else if (type == typeof(Task))
+            {
+                ResKind = ResponseKind.Task;
+            }
+            else if (typeof(Task).IsAssignableFrom(type) && type.IsGenericType)
+            {
+                ResKind = ResponseKind.TaskObject;
+                ArgResponse = type.GetGenericArguments()[0];
+                PIResponse = type.GetProperty("Result");
+#if DEBUG
+                if (PIResponse == null)
+                    Debug.WriteLine($"Cannot register response type: {type} for method: {MethodInfo.Name}");
+#endif
+            }
+            else
+            {
+                ResKind = ResponseKind.Object;
+                ArgResponse = type;
+            }
         }
 
         Func<object, object[], object>? CreateInvoker(MethodInfo method)

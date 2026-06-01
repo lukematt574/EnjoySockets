@@ -6,6 +6,7 @@ namespace EnjoySockets
     {
         int IdSerializer { get; }
         T? Deserialize<T>(ReadOnlySpan<byte> data);
+        T? Deserialize<T>(ReadOnlySequence<byte> data);
         object? Deserialize(ReadOnlySpan<byte> data, Type type);
         bool Deserialize(Type type, ReadOnlySpan<byte> data, ref object? obj);
         object? Deserialize(ReadOnlySequence<byte> data, Type type);

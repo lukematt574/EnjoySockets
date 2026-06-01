@@ -261,8 +261,12 @@ namespace EnjoySockets
             if (dto.Length < ETCPSocket.PacketHeader)
                 return false;
 
-            if (dto[0] == (byte)DataForm.Special)
+            var form = dto[0];
+            if (form == (byte)DataForm.Special)
                 return ReceiveSpecial(dto);
+
+            if (form == (byte)DataForm.MsgResponse)
+                return ReceiveMsgResponse(dto);
 
             MessageReceiveOperation? currentSession;
             var session = ReadSession(dto);
@@ -349,6 +353,7 @@ namespace EnjoySockets
         private protected virtual void RunReceiveMsg(DispatchHandler eData, ReadOnlySpan<byte> dto, ulong session) { }
         private protected virtual void RunReceiveMsg(DataReceiveOperation eData, ReadOnlySpan<byte> dto) { }
         private protected virtual bool ReceiveSpecial(ReadOnlySpan<byte> dto) { return true; }
+        private protected virtual bool ReceiveMsgResponse(ReadOnlySpan<byte> dto) { return true; }
 
         internal ValueTask<bool> RunObjMsgSend(MessageSendOperation msg)
         {
@@ -360,6 +365,21 @@ namespace EnjoySockets
             WriteTotalBytes(sendBufferSpan, msg.TotalBytes);
             WriteTarget(sendBufferSpan, msg.Target);
             WriteInstance(sendBufferSpan, msg.Instance);
+            var payloadLength = msg.FillSpan(sendBufferSpan.Slice(ETCPSocket.PacketHeader));
+
+            SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader + payloadLength), AESgcm);
+            return ETCPSocket.Write(BasicSocket, SendArgs);
+        }
+
+        internal virtual ValueTask<bool> SendResponseMsg(ulong session, object? obj, Type? t) { return ValueTask.FromResult(true); }
+
+        private protected ValueTask<bool> RunObjMsgResponseSend(MessageSendOperation msg)
+        {
+            var sendBufferSpan = _sendBuffer.AsSpan();
+
+            sendBufferSpan[0] = (byte)DataForm.MsgResponse;
+            WriteSession(sendBufferSpan, msg.Session);
+            WriteTotalBytes(sendBufferSpan, msg.TotalBytes);
             var payloadLength = msg.FillSpan(sendBufferSpan.Slice(ETCPSocket.PacketHeader));
 
             SendArgs.SetToSend(sendBufferSpan.Slice(0, ETCPSocket.PacketHeader + payloadLength), AESgcm);

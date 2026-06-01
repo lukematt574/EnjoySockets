@@ -6,23 +6,23 @@ namespace EnjoySockets
     {
         readonly ESocketResource _socket;
         readonly SingleEntrySemaphore _semaphore;
-
         readonly SpecialSendOperationPool _specialMessagePool;
         readonly HeartbeatSendOperationPool _heartbeatMessagePool;
-        internal MessageSendOperationPool _messagePool { get; private set; }
+
+        internal MessageSendOperationPool MessagePool { get; private set; }
 
         internal SendExecutor(ESocketResource socket)
         {
             _socket = socket;
             _specialMessagePool = new SpecialSendOperationPool();
             _heartbeatMessagePool = new HeartbeatSendOperationPool();
-            _messagePool = new MessageSendOperationPool();
             _semaphore = new();
+            MessagePool = new MessageSendOperationPool();
         }
 
         internal ValueTask<ulong> TrySendMsgAndGetSession(Func<MessageSendOperation, ValueTask<bool>> _task, ulong target, MemorySegment? segments, long instance)
         {
-            var obj = _messagePool.Rent();
+            var obj = MessagePool.Rent();
             obj.RunPrepare(_task, target, segments, instance);
             return TrySendMsgRun(obj);
         }
@@ -72,7 +72,7 @@ namespace EnjoySockets
             }
             finally
             {
-                _messagePool.Return(obj);
+                MessagePool.Return(obj);
             }
         }
 
