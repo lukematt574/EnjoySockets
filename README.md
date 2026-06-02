@@ -1,22 +1,35 @@
 # EnjoySockets
 [![NuGet Version](https://img.shields.io/nuget/v/EnjoySockets)](https://www.nuget.org/packages/EnjoySockets/)
 
-**EnjoySockets** is a high-performance C# library designed for TCP communication, with UDP support currently on the roadmap.
+**EnjoySockets** is a lightweight, low-latency TCP runtime for C# focused on message-driven architecture, RPC routing, and predictable concurrency.
 
-## Why EnjoySockets?
+Instead of dealing with raw sockets, threading, and synchronization, you build your network layer using simple attributes and message handlers.
 
-While working on numerous client-server projects, I often found myself lacking a "batteries-included" library that provided the necessary functionality out of the box. Many existing .NET libraries fall into two categories:
-1. **Too low-level:** Simple at first glance, but requiring you to manually implement critical components like flow control, pooling, and endpoint management.
-2. **Too complex:** Highly performant, but with a steep learning curve and a requirement to maintain significant amounts of boilerplate code throughout the project's lifecycle.
+Built for fast client-server systems with strong thread safety, low allocations, and stable performance under load.
 
-**EnjoySockets** bridges this gap by offering a comprehensive, performance-first suite of tools for socket programming.
+## Features
 
-## Key Features
+* **Deterministic Concurrency** - control execution order with attributes - globally or per connection - without manual locks.
 
-* 🚀 **Performance:** Zero-allocation focus, full `async` support, and optimized binary serialization.
-* 🛠️ **Ease of Use:** High-level abstractions including RPC, built-in session reconnection, and instance management.
-* ⚖️ **Resource Control:** Robust flow control using `System.Threading.Channels` and object pooling.
-* 🔌 **Non-invasive:** Designed for easy adoption into existing codebases without major refactoring.
+* **Low Allocation Runtime** - built-in pooling minimizes GC pressure and reduces memory overhead.
+
+* **Backpressure & Flow Control** - automatically slows senders when buffers become saturated.
+
+* **Declarative Security** - protect endpoints with attributes, payload limits, and permission-based routing.
+
+* **Built-in Communication Patterns**
+
+  * Fire & Forget
+  * Request / Response (RPC)
+  * Transactional messaging
+
+* **Serializer Friendly** - works well with serializers like MemoryPack and others.
+
+## Designed For
+
+* Developers who want to focus on application logic instead of socket infrastructure.
+* Applications requiring predictable message processing and safe concurrency.
+* Multiplayer, realtime, backend, and service-oriented applications.
 
 ## Benchmark Results
 
@@ -30,7 +43,7 @@ Below is a comparison of the library with two popular libraries.
 | ------------ | ----------- | -------- | -------- | -------- |
 | EnjoySockets | 19,847      | 0.050    | 0.060    | 0.065    |
 | SuperSocket  | 17,793      | 0.055    | 0.069    | 0.077    |
-| WatsonTCP    | 2,095       | 0.457    | 0.498    | 1.433    |
+| WatsonTCP    | 15,442      | 0.065    | 0.085    | 0.096    |
 
 ### 5 Clients
 
@@ -38,7 +51,7 @@ Below is a comparison of the library with two popular libraries.
 | ------------ | ----------- | -------- | -------- | -------- |
 | EnjoySockets | 81,829      | 0.058    | 0.076    | 0.087    |
 | SuperSocket  | 61,883      | 0.083    | 0.099    | 0.108    |
-| WatsonTCP    | 6,565       | 0.638    | 1.819    | 2.290    |
+| WatsonTCP    | 59,144      | 0.079    | 0.112    | 0.129    |
 
 ### 100 Clients
 
@@ -46,7 +59,7 @@ Below is a comparison of the library with two popular libraries.
 | ------------ | ----------- | -------- | -------- | -------- |
 | EnjoySockets | 234,156     | 0.390    | 0.554    | 1.429    |
 | SuperSocket  | 176,143     | 0.557    | 0.588    | 1.197    |
-| WatsonTCP    | 6,239       | 15.135   | 27.000   | 35.209   |
+| WatsonTCP    | 156,486     | 0.565    | 1.341    | 1.810    |
 
 The benchmark details can be found in the file: [TcpRttBenchmark README](./benchmarks/TcpRttBenchmark/README.md).
 
@@ -95,8 +108,9 @@ Install-Package EnjoySockets
 
 EnjoySockets supports **.NET 6** and **.NET 8+**, including **Native AOT** support.
 
-> [!TIP]
-> For maximum server-side performance, it is recommended to use **.NET 8 or newer** without Native AOT. This allows the JIT compiler to perform advanced, hardware-specific optimizations during runtime.
+> [!CAUTION]
+> Native AOT is recommended primarily for client applications.
+> For server-side applications, using the standard runtime is recommended to avoid reflection limitations and ensure full framework functionality.
 
 ### Native AOT Configuration
 
@@ -128,16 +142,16 @@ using EnjoySockets;
 string pemKeyPrivate = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 string pemKeyPrivateSign = "-----BEGIN PRIVATE KEY-----<your_pem_key>-----END PRIVATE KEY-----";
 
-var server = new ETCPServer(new(pemKeyPrivate, pemKeyPrivateSign));
+var server = new EServer(new(pemKeyPrivate, pemKeyPrivateSign));
 server.Start(EAddress.Get());
 
 Console.ReadKey();
 
 static class ExampleReceiveClassServer
 {
-    static void TestMethod(EUserServer user)
+    static void TestMethod(EServerSession session)
     {
-        user.Send("ResponseTestMethod", Random.Shared.Next());
+        session.Send("ResponseTestMethod", Random.Shared.Next());
     }
 }
 
@@ -152,22 +166,23 @@ using EnjoySockets;
 string pemKeyPublic = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBLIC KEY-----";
 
-var client = new EUserClient(new(pemKeyPublic, pemKeyPublicSign));
+var client = new EClient(new(pemKeyPublic, pemKeyPublicSign));
 
-if(await client.Connect(EAddress.Get()) == 0)
+if(await client.Connect(EAddress.Get()).IsSuccess)
 	await client.Send("TestMethod");
 
 Console.ReadKey();
 
 static class ExampleReceiveClassClient
 {
-    static void ResponseTestMethod(EUserClient user, int luckyNumber)
+    static void ResponseTestMethod(EClient client, int luckyNumber)
     {
         Console.WriteLine($"Your lucky number from server is: {luckyNumber}");
     }
 }
 
 ```
+
 ## 🔐 Encryption & Security
 
 EnjoySockets implements a hybrid encryption stack to ensure data confidentiality, integrity, and authenticity. It combines **RSA** (identity/handshake), **ECDH** (key exchange), and **AES-256-GCM** (transport encryption).
@@ -186,7 +201,7 @@ EnjoySockets features a "Fast Reconnect" mechanism that maintains high security 
 
 | Feature | Description |
 | :--- | :--- |
-| **Window** | Available within the `ETCPServerConfig.KeepAlive` timeframe (default: 60s). |
+| **Window** | Available within the `EServerConfig.KeepAlive` timeframe (default: 60s). |
 | **Token Rotation** | During reconnect, the client sends both the current `TokenToReconnect` (for identification) and a `NewTokenToReconnect`. |
 | **Dynamic Re-keying** | Even during a simple reconnect, the server **re-mixes the AES key** using the new salt. This ensures that session keys are rotated and never static. |
 | **Integrity** | If the tokens do not match the server-side state, the reconnection is rejected. |
@@ -242,17 +257,17 @@ public class MyEnterpriseERSA : ERSA
 
 ## Customizing User Classes
 
-EnjoySockets is built for extensibility. By inheriting from `EUserClient` and `EUserServer`, you can manage session states, authentication, and connection lifecycles.
+EnjoySockets is built for extensibility. By inheriting from `EClient` and `EServerSession`, you can manage session states, authentication, and connection lifecycles.
 
-### Client-Side Customization (`EUserClient`)
+### Client-Side Customization (`EClient`)
 
-Inherit from `EUserClient` to handle local session logic, authorization credentials, and reconnection behavior.
+Inherit from `EClient` to handle local session logic, authorization credentials, and reconnection behavior.
 
 > [!NOTE]
 > Receiving methods (message handlers) should be placed in a separate logic class, not within this class.
 
 ```csharp
-public class MyUserClient : EUserClient
+public class MyUserClient : EClient
 {
     public MyUserClient(ERSA ersa, ETCPClientConfig config) : base(ersa, config) { }
 
@@ -295,12 +310,12 @@ public class MyUserClient : EUserClient
 
 ---
 
-### Server-Side Customization (`EUserServer`)
+### Server-Side Customization (`EServerSession`)
 
-The `EUserServer` subclass is the heart of your user management. It allows you to validate identities, control access levels, and monitor for malicious behavior.
+The `EServerSession` subclass is the heart of your user management. It allows you to validate identities, control access levels, and monitor for malicious behavior.
 
 ```csharp
-public class MyUserServer : EUserServer
+public class MyUserServer : EServerSession
 {
     public MyUserServer(ESocketResourceServer srs) : base(srs) { }
 
@@ -351,7 +366,7 @@ public class MyUserServer : EUserServer
 
 ### Comparison: Lifecycle Events
 
-| Event | `EUserClient` | `EUserServer` |
+| Event | `EClient` | `EServerSession` |
 | --- | --- | --- |
 | **OnConnected** | First-time handshake success. | First-time handshake success. |
 | **OnReconnectAttempt** | Fires on every background attempt. | (Handled automatically by library). |
@@ -378,11 +393,11 @@ byte connectResult = await client.Connect(EAddress.Get());
 
 #### Server Side
 
-When starting the server, pass your custom class as a **generic type parameter** `<T>`. This instructs the `ETCPServer` to factory-produce an instance of `MyUserServer` for every incoming connection.
+When starting the server, pass your custom class as a **generic type parameter** `<T>`. This instructs the `EServer` to factory-produce an instance of `MyUserServer` for every incoming connection.
 
 ```csharp
 // Initialize the server with the generic user type <MyUserServer>
-var server = new ETCPServer<MyUserServer>(new ERSA(pemKeyPrivate, pemKeyPrivateSign));
+var server = new EServer<MyUserServer>(new ERSA(pemKeyPrivate, pemKeyPrivateSign));
 
 if (server.Start(EAddress.Get()))
 {
@@ -465,7 +480,7 @@ There are two primary ways to connect a client:
 | **0** | **Success** | Connection established successfully. |
 | **1** | Invalid Endpoint | The provided IP address or port is invalid. |
 | **2** | Timeout | The attempt timed out. Adjust via `ETCPClientConfig.ConnectTimeout`. |
-| **3** | Server Full | The server has reached its maximum connection limit. Adjust via `ETCPServerConfig.MaxSockets`. |
+| **3** | Server Full | The server has reached its maximum connection limit. Adjust via `EServerConfig.MaxSockets`. |
 | **4** | Verification Failed | Handshake failed during server verification. |
 | **5** | Encryption Error | Failed to establish the secure AES-256-GCM key. |
 | **6** | General Failure | An unexpected network or system error occurred. |
@@ -478,7 +493,7 @@ There are two primary ways to connect a client:
 
 #### Custom Authorization logic
 
-If you want to implement your own credential validation during the handshake, simply define the following method in your class derived from `EUserServer`:
+If you want to implement your own credential validation during the handshake, simply define the following method in your class derived from `EServerSession`:
 
 ```csharp
 protected Task<byte> Authorization(T credentials)
@@ -500,7 +515,7 @@ When a client uses the **Auto Reconnect** feature, the library ensures that secu
 
 * **Mandatory Re-Authorization:** Every time a client attempts to reconnect and resume a session, the `protected Task<byte> Authorization(T credentials)` method is executed again (if defined).
 * **Identity Verification:** This mechanism is crucial to prevent unauthorized users from hijacking an existing session. Even if a malicious actor attempts to resume a session by providing a valid `TokenToReconnect`, they must still pass your custom `Authorization` logic with the correct credentials.
-* **State Consistency:** By re-verifying the user during each reconnect, you ensure that the person accessing the persisted session data (like `Permissions` or `Inventory` in your custom `EUserServer`) is the same person who originally created the session.
+* **State Consistency:** By re-verifying the user during each reconnect, you ensure that the person accessing the persisted session data (like `Permissions` or `Inventory` in your custom `EServerSession`) is the same person who originally created the session.
 
 > [!CAUTION]
 > **Security Warning:** Always validate that the credentials provided during reconnection match the original session owner. If the `Authorization` method returns a non-zero value during a reconnect attempt, the library will immediately terminate the connection and mark the session as inaccessible for that attempt.
@@ -509,11 +524,11 @@ When a client uses the **Auto Reconnect** feature, the library ensures that secu
 
 #### Client Reusability
 
-The `EUserClient` (or your custom class) is **reusable**. When you call `client.Disconnect()`, the library cleans up the internal state and prepares the object for a fresh connection. You do **not** need to create a new object to log in as a different user.
+The `EClient` (or your custom class) is **reusable**. When you call `client.Disconnect()`, the library cleans up the internal state and prepares the object for a fresh connection. You do **not** need to create a new object to log in as a different user.
 
 #### Server-Side Session & Auto-Instances
 
-Unlike the client, `EUserServer` instances are **not reusable**.
+Unlike the client, `EServerSession` instances are **not reusable**.
 
 * **Status: Dead** - Once a session status changes to `Dead`, the object is finished. The user associated with it will never return to this specific instance.
 * **Automatic Instance Cleanup** - When a session becomes `Dead`, the library automatically "unhooks" the logic instances (e.g., `GameService`) associated with that user.
@@ -528,13 +543,13 @@ When a session becomes `Dead`, the library detaches the logic instances (like `G
 
 #### The Solution: The "Resource Anchor" Pattern
 
-The `EUserServer` object is the **only** component with a guaranteed `OnDisconnected` lifecycle trigger. You should bridge your resources from the logic instance to the user object or other managed place.
+The `EServerSession` object is the **only** component with a guaranteed `OnDisconnected` lifecycle trigger. You should bridge your resources from the logic instance to the user object or other managed place.
 
 **Recommended Implementation:**
 
 ```csharp
-// 1. The Anchor Class (EUserServer)
-public class MyUserServer : EUserServer
+// 1. The Anchor Class (EServerSession)
+public class MyUserServer : EServerSession
 {
     // A collection to hold resources needing manual disposal
     public List<IDisposable> ResourcesToDispose { get; } = new();
@@ -578,7 +593,7 @@ public class GameService
 This pattern is also applicable to the client side. Since session instances are cleared automatically, you must ensure all resources are properly disposed of to prevent memory leaks.
 
 > [!CAUTION]
-> **Why is this necessary?** Even if you don't keep a reference to a `Timer` or `Socket` in a static list, the .NET Runtime itself might keep them alive while they are active. Always use the `EUserServer.OnDisconnected()` method to explicitly shut down these resources.
+> **Why is this necessary?** Even if you don't keep a reference to a `Timer` or `Socket` in a static list, the .NET Runtime itself might keep them alive while they are active. Always use the `EServerSession.OnDisconnected()` method to explicitly shut down these resources.
 
 ## 📤 Sending Messages
 
@@ -648,7 +663,7 @@ Unlike a standard fire-and-forget `Send`, `SendWithResponse` is an advanced RPC-
 * `-3`: **Session Expired.** The response could not be retrieved because the session was permanently closed (e.g., via `Disconnect()` or a `KeepAlive` timeout).
 
 > [!IMPORTANT]
-> **Keep-Alive Tuning:** To ensure `SendWithResponse` can recover from longer outages, make sure `ETCPServerConfig.KeepAlive` is set to a value that allows your clients enough time to reconnect and claim their pending responses.
+> **Keep-Alive Tuning:** To ensure `SendWithResponse` can recover from longer outages, make sure `EServerConfig.KeepAlive` is set to a value that allows your clients enough time to reconnect and claim their pending responses.
 
 ---
 
@@ -683,7 +698,7 @@ You can control how each method (or an entire class) behaves using the `[EAttr]`
 
 #### Key Properties:
 
-* **`Access` (long):** A custom identifier used to verify if a user can call this method. Logic is handled via `OnCheckAccess` in your `EUserServer` class.
+* **`Access` (long):** A custom identifier used to verify if a user can call this method. Logic is handled via `OnCheckAccess` in your `EServerSession` class.
 * **`MaxParamSize` (int):** The maximum allowed size (in bytes) of the serialized parameter. Essential for protecting against large-payload attacks.
 * **`PoolId` (ushort):** Specifies which Object Pool configuration to use for the parameter (optimized memory usage).
 * **`ChannelId` (ushort):** Defines the **Execution Channel**. By default, messages are executed sequentially on a single thread (Channel 0). Custom channels allow for parallel or private execution flows.
@@ -896,7 +911,7 @@ If you want multiple users to interact with the **same physical object**, simply
 * `user.InstanceDetach()`: Clears **all** registered instances for that user.
 
 > [!NOTE]
-> **Important:** Even if multiple users are in the same `GameMatch` object, each user will have their own unique `instanceId` mapping to it. This keeps the internal routing table of each `EUserServer` fast and isolated.
+> **Important:** Even if multiple users are in the same `GameMatch` object, each user will have their own unique `instanceId` mapping to it. This keeps the internal routing table of each `EServerSession` fast and isolated.
 
 ### 🧬 Inheritance in Instances
 
@@ -1185,6 +1200,9 @@ As your project grows, you may eventually reach the limits of vertical expansion
 
 The library's high performance and flexible routing make it an excellent choice for building **custom proxy or gateway nodes**. You can use EnjoySockets to create a lightweight entry point that routes traffic to various backend microservices based on your specific requirements.
 
-### Future Roadmap
+## Future Roadmap
 
-Distributed systems are complex and highly dependent on individual use cases. If there is significant community demand for built-in distributed features (such as a cluster provider or message bus integration), I am open to developing these modules as the library evolves.
+EnjoySockets is built to evolve based on real-world needs and community feedback. The current development roadmap focuses on two main pillars:
+
+* **Protocol Expansion (UDP Support):** While the library currently excels at TCP communication, adding native UDP support is a high priority to accommodate low-latency use cases like gaming or real-time streaming.
+* **Distributed Architecture:** Distributed systems are complex and highly dependent on individual use cases. If there is significant community demand for built-in distributed features (such as a cluster provider or message bus integration), I am open to developing these modules as the library evolves.

@@ -1,54 +1,34 @@
 # EnjoySockets
 
-**EnjoySockets** is a lightweight, low-latency, message-driven TCP runtime for C# with RPC routing, actor-like instances and deterministic execution channels.
+**EnjoySockets** is a lightweight, low-latency TCP runtime for C# focused on message-driven architecture, RPC routing, and predictable concurrency.
 
-## Why EnjoySockets?
+Instead of dealing with raw sockets, threading, and synchronization, you build your network layer using simple attributes and message handlers.
 
-While working on numerous client-server projects, I often found myself lacking a library that provided necessary functionality out of the box without massive boilerplate.
+Built for fast client-server systems with strong thread safety, low allocations, and stable performance under load.
 
-* **Performance-First:** Built with a zero-allocation focus and full `async` support.
-* **Resource Control:** Robust flow control using `System.Threading.Channels` and object pooling.
-* **Easy Adoption:** High-level abstractions like RPC and session reconnection that don't require major refactoring.
+## Features
 
-## Serialization & Models
+* **Deterministic Concurrency** - control execution order with attributes - globally or per connection - without manual locks.
 
-The library uses **MemoryPack** as the default serializer for high-performance binary serialization.
+* **Low Allocation Runtime** - built-in pooling minimizes GC pressure and reduces memory overhead.
 
-You can also provide your own binary serializer implementation (for example **MessagePack** or **Protocol Buffers**) through the `ESerial` property in `ETCPConfig`.
-To implement a custom serializer, create a class that implements the `IESerializer` interface and assign an instance of that class to the configuration.
+* **Backpressure & Flow Control** - automatically slows senders when buffers become saturated.
 
-> [!IMPORTANT]
-> When using the default MemoryPack serializer, your message models must be marked as `partial` and have the `[MemoryPackable]` attribute. For advanced scenarios, refer to the [MemoryPack documentation](https://github.com/Cysharp/MemoryPack).
+* **Declarative Security** - protect endpoints with attributes, payload limits, and permission-based routing.
 
-## Installation
+* **Built-in Communication Patterns**
 
-```powershell
-Install-Package EnjoySockets
+  * Fire & Forget
+  * Request / Response (RPC)
+  * Transactional messaging
 
-```
+* **Serializer Friendly** - works well with serializers like MemoryPack and others.
 
-### Compatibility
+## Designed For
 
-EnjoySockets supports **.NET 6** and **.NET 8+**, including **Native AOT**.
-
-* *Recommendation:* For maximum server-side performance, use **.NET 8 or newer**. This allows the JIT to perform hardware-specific optimizations that often outperform Native AOT in high-throughput scenarios.
-
-### Native AOT Configuration
-
-To use Native AOT, add these sections to your `.csproj` and ensure you include the assembly containing your logic/message classes to prevent the trimmer from removing them:
-
-```xml
-<PropertyGroup>
-  <PublishAot>true</PublishAot>
-  <InvariantGlobalization>true</InvariantGlobalization>
-</PropertyGroup>
-
-<ItemGroup>
-  <TrimmerRootAssembly Include="EnjoySockets" />
-  <TrimmerRootAssembly Include="YourProject" />
-</ItemGroup>
-
-```
+* Developers who want to focus on application logic instead of socket infrastructure.
+* Applications requiring predictable message processing and safe concurrency.
+* Multiplayer, realtime, backend, and service-oriented applications.
 
 ## Quick Start
 
@@ -103,10 +83,6 @@ static class ExampleReceiveClassClient
 }
 
 ```
-
-## Encryption & Security
-
-EnjoySockets implements a hybrid encryption stack to ensure data confidentiality, integrity, and authenticity. It combines **RSA** (identity/handshake), **ECDH** (key exchange), and **AES-256-GCM** (transport encryption).
 
 ---
 
