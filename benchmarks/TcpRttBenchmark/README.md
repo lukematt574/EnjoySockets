@@ -80,40 +80,52 @@ One pass consisted of:
 
 | Library | RTT (msg/s) | Throughput (MB/s) | p50 (ms) | p95 (ms) | p99 (ms) | p999 (ms) | max (ms) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **EnjoySockets** | **19,847** | **19.46** | **0.050** | 0.060 | 0.065 | 0.079 | 0.647 |
+| **EnjoySockets** | 19,847 | 19.46 | 0.050 | 0.060 | 0.065 | 0.079 | 0.647 |
 | SuperSocket | 17,793 | 17.44 | 0.055 | 0.069 | 0.077 | 0.092 | 0.731 |
-| WatsonTCP | 2,095 | 2.05 | 0.457 | 0.498 | 1.433 | 1.869 | 2.283 |
+| WatsonTCP | 15,442 | 15.14 | 0.065 | 0.085 | 0.096 | 0.123 | 0.445 |
 
 ### 5 Clients
 
 | Library | RTT (msg/s) | Throughput (MB/s) | p50 (ms) | p95 (ms) | p99 (ms) | p999 (ms) | max (ms) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **EnjoySockets** | **81,829** | **80.22** | **0.058** | 0.076 | 0.087 | 0.144 | 2.674 |
+| **EnjoySockets** | 81,829 | 80.22 | 0.058 | 0.076 | 0.087 | 0.144 | 2.674 |
 | SuperSocket | 61,883 | 60.67 | 0.083 | 0.099 | 0.108 | 0.152 | 0.545 |
-| WatsonTCP | 6,565 | 6.44 | 0.638 | 1.819 | 2.290 | 3.102 | 4.418 |
+| WatsonTCP | 59,144 | 57.98 | 0.079 | 0.112 | 0.129 | 0.430 | 1.251 |
 
 ### 100 Clients
 
 | Library | RTT (msg/s) | Throughput (MB/s) | p50 (ms) | p95 (ms) | p99 (ms) | p999 (ms) | max (ms) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **EnjoySockets** | **234,156** | **229.56** | **0.390** | 0.554 | 1.429 | 2.194 | 17.318 |
+| **EnjoySockets** | 234,156 | 229.56 | 0.390 | 0.554 | 1.429 | 2.194 | 17.318 |
 | SuperSocket | 176,143 | 172.69 | 0.557 | 0.588 | 1.197 | 1.611 | 4.083 |
-| WatsonTCP | 6,239 | 6.12 | 15.135 | 27.000 | 35.209 | 46.223 | 159.197 |
+| WatsonTCP | 156,486 | 153.42 | 0.565 | 1.341 | 1.810 | 2.510 | 58.120 |
 
 -----
 
 ## Conclusions & Observations
 
-### WatsonTCP
+### SuperSocket (2.0.2)
 
-WatsonTCP is the least performant in this comparison, falling behind by orders of magnitude. While it is excellent for rapid prototyping and simple tools due to its user-friendly API, it is not recommended for high-frequency real-time messaging or systems requiring high throughput.
+SuperSocket shows remarkable stability and scales very linearly. Its p99 and maximum latency values remain tight even as the number of clients increases. 
 
-### SuperSocket vs. EnjoySockets
+This suggests a highly optimized, possibly mirrored architecture for both client and server sides.
 
-The performance gap between EnjoySockets and SuperSocket is relatively small, with **EnjoySockets consistently leading in raw messages per second**.
+### WatsonTCP (6.3.1)
 
-  * **SuperSocket Stability**: SuperSocket shows remarkable stability and scales very linearly. Its p99 and maximum latency values remain tight even as the number of clients increases. This suggests a highly optimized, possibly mirrored architecture for both client and server sides.
-  * **EnjoySockets "Tail" Latency**: In the 100-client test, EnjoySockets exhibits a "tail" (higher p99 and max latency). This is an architectural trade-off:
-      * The library is designed for the "1 Client = 1 PC" scenario.
-      * To maximize developer experience, the client-side uses frequent asynchronous context switching. When 100 clients are simulated on a *single* machine, they compete for the `ThreadPool`, leading to queuing and increased latency jitter.
-      * **Real-world Impact**: In a distributed scenario (real clients on different hardware), this tail would likely disappear, as seen in the 1-client results.
+Compared to the earlier benchmark on version (6.1.0), this library shows a significant performance improvement, placing it close behind the two top-performing implementations.
+
+With a higher number of concurrent clients, a small tail-latency becomes noticeable. 
+
+Similar to SuperSocket, the architecture is likely mirrored between the client and server sides. There is still potential for further work on scalability, but overall, the library scales well under increasing load.
+
+### EnjoySockets (1.2.1)
+
+This library achieved the best overall result in this test, demonstrating strong scalability characteristics.
+
+Similarly to WatsonTCP, a slight tail-latency appears under a high number of concurrent clients. This is primarily caused by the client-side design, which includes several developer-friendly mechanisms.
+
+In this benchmark, multiple clients are aggregated within a single application instance. On the client side, this introduces additional overhead such as frequent asynchronous context switching per response, as well as tracking of pending reliable send operations, including lifecycle management and retransmission state handling.
+
+Under heavy client consolidation, this additional resource pressure is reflected as a small tail-latency effect.
+
+It is worth noting that this benchmark represents a synthetic scenario. In typical real-world usage, each client runs as a separate application instance on its own machine, which removes this shared-resource overhead and produces results closer to the single-client performance profile.

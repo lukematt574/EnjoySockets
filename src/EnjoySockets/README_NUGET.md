@@ -16,10 +16,10 @@ Built for fast client-server systems with strong thread safety, low allocations,
 
 * **Declarative Security** - protect endpoints with attributes, payload limits, and permission-based routing.
 
-* **Built-in Communication Patterns**
+* **Communication Patterns**
 
   * Fire & Forget
-  * Request / Response (RPC)
+  * Request / Response
   * Transactional messaging
 
 * **Serializer Friendly** - works well with serializers like MemoryPack and others.
