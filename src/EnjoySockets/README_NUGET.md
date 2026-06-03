@@ -9,20 +9,15 @@ Built for fast client-server systems with strong thread safety, low allocations,
 ## Features
 
 * **Deterministic Concurrency** - control execution order with attributes - globally or per connection - without manual locks.
-
 * **Low Allocation Runtime** - built-in pooling minimizes GC pressure and reduces memory overhead.
-
 * **Backpressure & Flow Control** - automatically slows senders when buffers become saturated.
-
 * **Declarative Security** - protect endpoints with attributes, payload limits, and permission-based routing.
-
 * **Communication Patterns**
-
   * Fire & Forget
   * Request / Response
   * Transactional messaging
-
-* **Serializer Friendly** - works well with serializers like MemoryPack and others.
+* **Session Recovery & Reconnection** - handles transient connection losses, ensuring operations survive and resume during client reconnection modes.
+* **Serializer Friendly** - works with binary serializers like `MemoryPack` and others.
 
 ## Designed For
 

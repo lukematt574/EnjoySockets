@@ -287,15 +287,14 @@ namespace EnjoySockets
         /// </list>
         /// </param>
         /// <remarks>
-        /// Override this method in a derived class to implement custom handling,
-        /// such as logging, alerting or recording metrics.
+        /// Override this method in a derived class to implement custom handling, such as logging, alerting or recording metrics.
         /// </remarks>
-        protected virtual Task OnPotentialSabotage(int msg) { return Task.CompletedTask; }
+        protected virtual Task OnPotentialSabotage(ESabotageResult msg) { return Task.CompletedTask; }
 
         /// <summary>
         /// Disconnect and invoke OnPotentialSabotage method.
         /// </summary>
-        public void PotentialSabotage(int msg)
+        public void PotentialSabotage(ESabotageResult msg)
         {
             Disconnect();
             _ = OnPotentialSabotage(msg);

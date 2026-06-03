@@ -55,7 +55,7 @@ namespace EnjoySockets
         private protected Dictionary<long, (object, Dictionary<ulong, DispatchHandler>)> _privateInstances = [];
         private protected Dictionary<Type, object> _localInstances = [];
 
-        internal Action<int>? RunOnPotentialSabotageEvent { get; set; }
+        internal Action<ESabotageResult>? RunOnPotentialSabotageEvent { get; set; }
         internal Action? RunDisposeEvent { get; set; }
 
         internal ESocketResource(ESocketRole socketRole, EConfig config, ERSA rsa)

@@ -256,7 +256,7 @@ namespace EnjoySockets
             }
             SendSpecial(eData.Session, typeMsg, eData.Response);
             if (eData.CorruptedArg)
-                RunOnPotentialSabotageEvent?.Invoke(1);
+                RunOnPotentialSabotageEvent?.Invoke(ESabotageResult.ArgCorrupted);
             eData.Dispose();
         }
 
@@ -331,7 +331,7 @@ namespace EnjoySockets
 
             if (Interlocked.Increment(ref _maxSendSpecialCount) > _limitSendSpecial)
             {
-                RunOnPotentialSabotageEvent?.Invoke(2);
+                RunOnPotentialSabotageEvent?.Invoke(ESabotageResult.Flooding);
                 RunDisposeEvent?.Invoke();
                 Interlocked.Decrement(ref _maxSendSpecialCount);
                 return ValueTask.FromResult(false);

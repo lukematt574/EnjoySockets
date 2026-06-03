@@ -10,21 +10,14 @@ Built for fast client-server systems with strong thread safety, low allocations,
 ## Features
 
 * **Deterministic Concurrency** - control execution order with attributes - globally or per connection - without manual locks.
-
 * **Low Allocation Runtime** - built-in pooling minimizes GC pressure and reduces memory overhead.
-
 * **Backpressure & Flow Control** - automatically slows senders when buffers become saturated.
-
 * **Declarative Security** - protect endpoints with attributes, payload limits, and permission-based routing.
-
 * **Communication Patterns**
-
   * Fire & Forget
   * Request / Response
   * Transactional messaging
-
 * **Session Recovery & Reconnection** - handles transient connection losses, ensuring operations survive and resume during client reconnection modes.
-
 * **Serializer Friendly** - works with binary serializers like `MemoryPack` and others.
 
 ## Designed For
@@ -90,7 +83,7 @@ The benchmark details can be found in the file: [TcpRttBenchmark README](./bench
 
 The library uses **MemoryPack** as the default serializer for high-performance binary serialization.
 
-You can also provide your own binary serializer implementation (for example **MessagePack** or **Protocol Buffers**) through the `ESerial` property in `ETCPConfig`.
+You can also provide your own binary serializer implementation (for example **MessagePack** or **Protocol Buffers**) through the `ESerial` property in `EConfig`.
 
 To implement a custom serializer, create a class that implements the `IESerializer` interface and assign an instance of that class to the configuration.
 
@@ -194,8 +187,8 @@ EnjoySockets implements a hybrid encryption stack to ensure data confidentiality
 The library uses a robust handshake to establish a secure channel while preventing Man-in-the-Middle (MITM) attacks.
 
 #### 1. Initial Connection
-* **Client Side:** The client generates an ephemeral **ECDH** key pair (default: `nistP384`). It prepares a `ConnectDTO` containing a unique `UserId`, a `TokenToReconnect`, and the public `Key`. This payload is encrypted using the server's **RSA Public Key**.
-* **Server Side:** The server decrypts the packet, uses the `TokenToReconnect` as **Salt** to derive the unique AES session key, and responds with its own ECDH public key plus an **RSA Digital Signature**.
+* **Client Side:** The client generates an ephemeral **ECDH** key pair (default: `nistP384`). It prepares a byte packet containing a unique `UserId`, a `TokenToReconnect`, `Salt` and the public `Key`. This payload is encrypted using the server's **RSA Public Key**.
+* **Server Side:** The server decrypts the packet, uses the `Salt` to derive the unique AES session key, and responds with its own ECDH public key plus an **RSA Digital Signature**.
 * **Finalization:** Both parties compute the shared secret. All subsequent traffic is encrypted with **AES-256-GCM**.
 
 #### 2. Session Reconnection & Key Rotation
@@ -204,8 +197,8 @@ EnjoySockets features a "Fast Reconnect" mechanism that maintains high security 
 | Feature | Description |
 | :--- | :--- |
 | **Window** | Available within the `EServerConfig.KeepAlive` timeframe (default: 60s). |
-| **Token Rotation** | During reconnect, the client sends both the current `TokenToReconnect` (for identification) and a `NewTokenToReconnect`. |
-| **Dynamic Re-keying** | Even during a simple reconnect, the server **re-mixes the AES key** using the new salt. This ensures that session keys are rotated and never static. |
+| **Token Rotation** | During reconnect, the client sends both the current `TokenToReconnect` (for identification) and a `Salt`. |
+| **Dynamic Re-keying** | Even during a simple reconnect, the server **re-mixes the AES key** using the new `Salt`. This ensures that session keys are rotated. |
 | **Integrity** | If the tokens do not match the server-side state, the reconnection is rejected. |
 
 ---
@@ -213,7 +206,7 @@ EnjoySockets features a "Fast Reconnect" mechanism that maintains high security 
 ### 🛡️ Cryptographic Standards
 
 * **RSA:** Identity verification and secure delivery of the initial ECDH exchange.
-* **ECDH (P-384):** Provides **Forward Secrecy**. Configurable via `ETCPConfig.ECCurve`.
+* **ECDH (P-384):** Provides **Forward Secrecy**. Configurable via `EConfig.ECCurve`.
 * **AES-256-GCM:** Authenticated encryption (AEAD) for all messages, preventing both eavesdropping and data tampering.
 * **Salted KDF:** Continuous key derivation using revolving tokens to ensure session freshness.
 
@@ -341,7 +334,7 @@ public class MyUserServer : EServerSession
         return true; 
     }
 
-    protected override Task OnPotentialSabotage(int msgCode)
+    protected override Task OnPotentialSabotage(ESabotageResult msgCode)
     {
         // Handle security events:
         // 1 - Invalid packet structure (outdated or tampered client)
@@ -385,7 +378,7 @@ Simply instantiate your custom class. The library handles the internal handshake
 
 ```csharp
 // Initialize the client with your custom logic class
-var client = new MyUserClient(new ERSA(pemKeyPublic, pemKeyPublicSign), new ETCPClientConfig());
+var client = new MyUserClient(new ERSA(pemKeyPublic, pemKeyPublicSign), new EClientConfig());
 
 // Connect to the server using EAddress helper
 byte connectResult = await client.Connect(EAddress.Get());

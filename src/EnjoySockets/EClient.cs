@@ -379,7 +379,7 @@ namespace EnjoySockets
         /// Gets the user-defined authorization object to be sent during the connection handshake.
         /// <para/>
         /// The returned object is always of type <see cref="object"/> in the base class,
-        /// but in the derived <c>EUserServer</c> class the user knows its actual type
+        /// but in the derived <c><see cref="EServerSession"/></c> class the user knows its actual type
         /// and should pass it directly to the corresponding method:
         /// <code>
         /// protected Task&lt;byte&gt; Authorization(actualType obj)
@@ -399,7 +399,7 @@ namespace EnjoySockets
         /// <param name="attemptResult">
         /// The result code of the attempt. A value of <c>0</c> typically indicates success; any other value represents an error.
         /// </param>
-        protected virtual void OnReconnectAttempt(int attemptCount, byte attemptResult) { }
+        protected virtual void OnReconnectAttempt(int attemptCount, EConnectResult attemptResult) { }
 
         const int _maxReconnectDelayMs = 60000;
         const int _minReconnectDelayMs = 1000;
