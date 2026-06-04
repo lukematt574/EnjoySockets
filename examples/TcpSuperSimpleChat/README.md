@@ -23,7 +23,7 @@ Since this is a global chat shared by all users, only static methods are used, a
 To distinguish users in the simplest possible way, a custom user class is created by extending the base user class:
 
 ```csharp
-public class MyUserServer : EUserServer
+public class MyUserServer : EServerSession
 {
     static int _idValue;
     public int UserId { get; private set; }
@@ -40,7 +40,7 @@ public class MyUserServer : EUserServer
 Then the server is initialized using the custom user class:
 
 ```csharp
-var serv = new ETCPServer<MyUserServer>(new ERSA(PrivatePemKey, PrivatePemKeyToSign));
+var serv = new EServer<MyUserServer>(new ERSA(PrivatePemKey, PrivatePemKeyToSign));
 ```
 
 The main logic is implemented in the static `MainChat.cs` class.
@@ -100,7 +100,7 @@ public static class MainChat
         for (int i = 0; i < _users.Count; i++)
         {
             var u = _users[i];
-            if (!u.SendSerialized("PushMsg", payload) && u.Status == ESocketServerStatus.Dead)
+            if (!u.SendSerialized("PushMsg", payload) && u.Status == EServerSessionStatus.Dead)
             {
                 _users.RemoveAt(i);
                 i--;
@@ -120,10 +120,10 @@ The client runs an infinite loop reading input from the console and sending mess
 It also defines a `PushMsg` handler that receives and prints messages from the server.
 
 ```csharp
-var client = new EUserClient(new ERSA(PublicPemKey, PublicPemKeyToSign));
-if (await client.Connect(EAddress.Get()) == 0)
+var client = new EClient(new ERSA(PublicPemKey, PublicPemKeyToSign));
+if ((await client.Connect(EAddress.Get())).IsSuccess)
 {
-    long id = await client.SendWithResponse("RegisterUser");
+    long id = await client.SendTransact("RegisterUser");
     if (id > 0)
     {
         Console.WriteLine($"You have joined the chat room as User({id})");
@@ -164,7 +164,7 @@ else
 public static class MainChat
 {
     [EAttr(PoolId = 1, MaxParamSize = 4096)]
-    static void PushMsg(EUserClient user, List<byte> msg)
+    static void PushMsg(EClient user, List<byte> msg)
     {
         if (msg.Count <= 4)
             return;
