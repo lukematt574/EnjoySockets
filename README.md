@@ -163,7 +163,7 @@ string pemKeyPublicSign = "-----BEGIN PUBLIC KEY-----<your_pem_key>-----END PUBL
 
 var client = new EClient(new(pemKeyPublic, pemKeyPublicSign));
 
-if(await client.Connect(EAddress.Get()).IsSuccess)
+if((await client.Connect(EAddress.Get())).IsSuccess)
 	await client.Send("TestMethod");
 
 Console.ReadKey();
@@ -196,9 +196,8 @@ EnjoySockets features a "Fast Reconnect" mechanism that maintains high security 
 
 | Feature | Description |
 | :--- | :--- |
-| **Window** | Available within the `EServerConfig.KeepAlive` timeframe (default: 60s). |
+| **Window** | Available within the `EConfigServer.KeepAlive` timeframe (default: 60s). |
 | **Token Rotation** | During reconnect, the client sends both the current `TokenToReconnect` (for identification) and a `Salt`. |
-| **Dynamic Re-keying** | Even during a simple reconnect, the server **re-mixes the AES key** using the new `Salt`. This ensures that session keys are rotated. |
 | **Integrity** | If the tokens do not match the server-side state, the reconnection is rejected. |
 
 ---
@@ -264,7 +263,7 @@ Inherit from `EClient` to handle local session logic, authorization credentials,
 ```csharp
 public class MyUserClient : EClient
 {
-    public MyUserClient(ERSA ersa, EClientConfig config) : base(ersa, config) { }
+    public MyUserClient(ERSA ersa, EConfigClient config) : base(ersa, config) { }
 
     // Provide credentials for the handshake 
 	// (can be a string, class, or any object support via 'MemoryPack')
@@ -378,7 +377,7 @@ Simply instantiate your custom class. The library handles the internal handshake
 
 ```csharp
 // Initialize the client with your custom logic class
-var client = new MyUserClient(new ERSA(pemKeyPublic, pemKeyPublicSign), new EClientConfig());
+var client = new MyUserClient(new ERSA(pemKeyPublic, pemKeyPublicSign), new EConfigClient());
 
 // Connect to the server using EAddress helper
 byte connectResult = await client.Connect(EAddress.Get());
@@ -473,7 +472,7 @@ There are two primary ways to connect a client:
 | --- | --- | --- |
 | **0** | **Success** | Connection established successfully. |
 | **1** | InvalidEndpoint | The provided endpoint (IP/address) is invalid or malformed. |
-| **2** | Timeout | The attempt timed out before a response was received. Adjust via `EClientConfig.ConnectTimeout`. |
+| **2** | Timeout | The attempt timed out before a response was received. Adjust via `EConfigClient.ConnectTimeout`. |
 | **3** | ServerFull | The server has reached its maximum capacity and cannot accept new connections. |
 | **4** | ServerVerificationFailed | Server verification failed during the handshake or initial validation. |
 | **5** | HandshakeFailed | Failed to establish a secure connection (e.g., encryption handshake error). |
@@ -610,7 +609,7 @@ await client.Send("UpdateStatus", statusDto);
 
 Designed for high-priority operations (e.g., financial transactions, inventory updates) that require verification of execution status on the server. The method returns an `ETransactResult`.
 
-Operation state tracking is lost only if a `SessionExpired` code is returned. This indicates the client failed to reconnect to the server within the `EServerConfig.KeepAlive` timeout window.
+Operation state tracking is lost only if a `SessionExpired` code is returned. This indicates the client failed to reconnect to the server within the `EConfigServer.KeepAlive` timeout window.
 
 ```csharp
 var txResult = await client.SendTransact("BookOrder", orderDto);
