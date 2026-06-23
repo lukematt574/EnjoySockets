@@ -540,7 +540,6 @@ namespace EnjoySockets
 
                     if (control == 2 || control == 5)
                     {
-                        //old key
                         SocketResource.SetTokenToReconnect();
                         if (_firstConnect)
                             return Close(EConnectResult.HandshakeFailed);
@@ -565,7 +564,6 @@ namespace EnjoySockets
                         if (signature.Length < 1)
                             return Close(EConnectResult.HandshakeFailed);
 
-                        //new key
                         if (await SocketResource.Ersa.VerifyDataRsa(signature, ReadSign(responseDTO)))
                         {
                             if (SocketResource.SetAesGcmKey(pKey.Span, SocketResource.Salt))
@@ -680,12 +678,10 @@ namespace EnjoySockets
         /// <remarks>
         /// The message is considered sent once it is successfully handed off to the operating system. 
         /// Note that returning <see langword="true"/> does not guarantee that the connection is still active; 
-        /// rather, it forces the underlying TCP socket to attempt a transmission, which triggers the 
-        /// stack to update and verify the current connection status.
+        /// rather, it forces the underlying TCP socket to attempt a transmission, which triggers the stack to update and verify the current connection status.
         /// </remarks>
         /// <returns>
-        /// <see langword="true"/> if the message was successfully passed to the operating system;
-        /// otherwise, <see langword="false"/>.
+        /// <see langword="true"/> if the message was successfully passed to the operating system; otherwise, <see langword="false"/>.
         /// </returns>
         public ValueTask<bool> SendHeartbeat()
         {
@@ -693,67 +689,6 @@ namespace EnjoySockets
                 return ValueTask.FromResult(false);
 
             return SocketResource.ExecutorSend.TrySendHeartbeat(SocketResource.RunHeartbeatSend);
-        }
-
-        CancellationTokenSource? _heartbeatCts;
-        /// <summary>
-        /// Starts the heartbeat loop for the session, periodically sending or handling keep-alive signals.
-        /// <para/>
-        /// The operation is idempotent - calling it multiple times has no effect if already running.
-        /// </summary>
-        /// <param name="cycleTime">The interval in milliseconds between heartbeat executions.</param>
-        public void HeartbeatStart(int cycleTime = 2000)
-        {
-            CancellationTokenSource cts;
-
-            lock (_lock)
-            {
-                if (_heartbeatCts != null)
-                    return;
-
-                cts = new CancellationTokenSource();
-                _heartbeatCts = cts;
-            }
-
-            _ = StartHandleHeartbeat(cts, cycleTime);
-        }
-
-        /// <summary>
-        /// Stops the heartbeat loop and releases all associated resources.
-        /// <para/>
-        /// If the heartbeat is not running, this method has no effect.
-        /// </summary>
-        public void HeartbeatStop()
-        {
-            CancellationTokenSource? cts;
-
-            lock (_lock)
-            {
-                cts = _heartbeatCts;
-                _heartbeatCts = null;
-            }
-
-            if (cts != null)
-            {
-                cts.Cancel();
-                cts.Dispose();
-            }
-        }
-
-        async Task StartHandleHeartbeat(CancellationTokenSource cts, int cycleTime)
-        {
-            try
-            {
-                var ct = cts.Token;
-                while (!ct.IsCancellationRequested)
-                {
-                    if (!await SendHeartbeat())
-                        break;
-
-                    await Task.Delay(cycleTime, ct);
-                }
-            }
-            catch { }
         }
 
         internal sealed override bool Start()
@@ -815,22 +750,20 @@ namespace EnjoySockets
         /// </summary>
         public void Disconnect()
         {
-            EClientStatus status;
+            bool shouldCleanup = false;
             lock (_lock)
             {
-                status = EClientStatus.Connected;
                 if (Status != EClientStatus.Disconnected)
                 {
                     Status = EClientStatus.Disconnected;
                     _reconnectDelayMs = 0;
-                    status = Status;
                     UserId = SetGuidUserId();
                     SocketResource?.Dispose();
+                    shouldCleanup = true;
                 }
             }
-            if (status == EClientStatus.Disconnected)
+            if (shouldCleanup)
             {
-                HeartbeatStop();
                 _sendFlowController.CancelAll();
                 OnDisconnected();
             }
