@@ -100,23 +100,29 @@ namespace EnjoySockets
 
         void CheckUserObjAndTrySetAuth()
         {
-            if ((typeof(T1) == typeof(EServerSession) || typeof(T1).IsSubclassOf(typeof(EServerSession))) && CheckTypeUser())
+            var t = GetTypeUser();
+            if ((typeof(T1) == typeof(EServerSession) || typeof(T1).IsSubclassOf(typeof(EServerSession))) && t != null)
             {
                 try
                 {
-                    MethodInfo? method = typeof(T1).GetMethod("Authorization", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if (method != null)
+                    var authInterface = t.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEAuthorization<>));
+                    if(authInterface != null)
                     {
-                        var authBase = method.GetBaseDefinition();
-                        if (authBase.ReturnType == typeof(Task<byte>))
+                        Type genericArgument = authInterface.GetGenericArguments()[0];
+                        MethodInfo? method = t.GetMethod("OnAuthorization", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                        if (method != null)
                         {
-                            var _authorizationParams = authBase.GetParameters();
-                            if (_authorizationParams.Length == 1)
+                            var authBase = method.GetBaseDefinition();
+                            if (authBase.ReturnType == typeof(Task<EConnectResult>))
                             {
-                                AuthorizationObj = _authorizationParams[0].ParameterType;
-                                _authorizationMethod = method;
-                                _connectResponse = 1;
-                                _reconnectResponse[0] = 2;
+                                var _authorizationParams = authBase.GetParameters();
+                                if (_authorizationParams.Length == 1 && _authorizationParams[0].ParameterType == genericArgument)
+                                {
+                                    AuthorizationObj = genericArgument;
+                                    _authorizationMethod = method;
+                                    _connectResponse = 1;
+                                    _reconnectResponse[0] = 2;
+                                }
                             }
                         }
                     }
@@ -127,20 +133,19 @@ namespace EnjoySockets
         }
 
         /// <summary>
-        /// Check type support user object
+        /// Get type support user object
         /// </summary>
-        /// <returns>false - no support, true - support</returns>
-        bool CheckTypeUser()
+        Type? GetTypeUser()
         {
             var esr = RentESR(Config, _rsaKey);
             try
             {
-                _ = Activator.CreateInstance(typeof(T1), [esr]) as EServerSession;
-                return true;
+                var obj = Activator.CreateInstance(typeof(T1), [esr]);
+                return obj?.GetType();
             }
             catch
             {
-                return false;
+                return null;
             }
             finally
             {
@@ -436,8 +441,8 @@ namespace EnjoySockets
                                 {
                                     var objAuth = Config.ESerial.Deserialize(msgBytes.Span, AuthorizationObj);
                                     var resAuth = await clientAlive.CheckAuthorization(objAuth);
-                                    await clientAlive.SocketResource.SendBytes(resAuth);
-                                    if (resAuth == 0)
+                                    await clientAlive.SocketResource.SendBytes(resAuth.Code);
+                                    if (resAuth.IsSuccess)
                                     {
                                         StartUser(clientAlive);
                                         return;
@@ -489,8 +494,8 @@ namespace EnjoySockets
                                         client.AuthorizationMethod = _authorizationMethod;
                                         var objAuth = Config.ESerial.Deserialize(msgBytes.Span, AuthorizationObj);
                                         var resAuth = await client.CheckAuthorization(objAuth);
-                                        await esr.SendBytes(resAuth);
-                                        if (resAuth == 0)
+                                        await esr.SendBytes(resAuth.Code);
+                                        if (resAuth.IsSuccess)
                                         {
                                             StartUser(ReadUserId(connectDTO), client);
                                             return;

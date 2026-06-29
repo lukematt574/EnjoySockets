@@ -235,19 +235,19 @@ namespace EnjoySockets
             }
         }
 
-        internal async Task<byte> CheckAuthorization(object? obj)
+        internal async Task<EConnectResult> CheckAuthorization(object? obj)
         {
             try
             {
-                if (AuthorizationMethod == null)
-                    return await Task.FromResult((byte)1);
+                if (AuthorizationMethod == null || obj == null)
+                    return (EConnectResult)1;
 
                 var result = AuthorizationMethod.Invoke(this, [obj]);
-                return await (Task<byte>)result!;
+                return await (Task<EConnectResult>)result!;
             }
             catch
             {
-                return await Task.FromResult((byte)1);
+                return (EConnectResult)1;
             }
         }
 
